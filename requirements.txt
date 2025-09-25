@@ -1,5 +1,7 @@
 streamlit
 pandas
 ydata-profiling
-pycaret
 plotly
+pycaret
+scikit-learn
+numpy
