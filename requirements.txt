@@ -2,3 +2,6 @@ streamlit
 pandas
 plotly
 ydata-profiling
+scipy
+matplotlib
+numpy
