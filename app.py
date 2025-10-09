@@ -204,3 +204,62 @@ if uploaded_file is not None:
 
 else:
     st.info("👆 Please upload a CSV file to get started.")
+
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    confusion_matrix, classification_report,
+    r2_score, mean_absolute_error, mean_squared_error
+)
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# After training and prediction
+y_pred = model.predict(X_test)
+
+# Determine problem type automatically
+if len(np.unique(y)) <= 20 and y.dtype != "float":  # heuristic: small set of discrete values
+    st.subheader("📊 Classification Metrics")
+
+    acc = accuracy_score(y_test, y_pred)
+    prec = precision_score(y_test, y_pred, average='weighted', zero_division=0)
+    rec = recall_score(y_test, y_pred, average='weighted', zero_division=0)
+    f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
+
+    st.write(f"**Accuracy:** {acc:.3f}")
+    st.write(f"**Precision:** {prec:.3f}")
+    st.write(f"**Recall:** {rec:.3f}")
+    st.write(f"**F1-Score:** {f1:.3f}")
+
+    st.text("Classification Report:")
+    st.text(classification_report(y_test, y_pred, zero_division=0))
+
+    # Confusion Matrix
+    cm = confusion_matrix(y_test, y_pred)
+    fig, ax = plt.subplots()
+    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("Actual")
+    st.pyplot(fig)
+
+else:
+    st.subheader("📈 Regression Metrics")
+
+    r2 = r2_score(y_test, y_pred)
+    mae = mean_absolute_error(y_test, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+    rmse = np.sqrt(mse)
+
+    st.write(f"**R² Score:** {r2:.3f}")
+    st.write(f"**MAE:** {mae:.3f}")
+    st.write(f"**MSE:** {mse:.3f}")
+    st.write(f"**RMSE:** {rmse:.3f}")
+
+    # Actual vs Predicted Plot
+    fig, ax = plt.subplots()
+    sns.scatterplot(x=y_test, y=y_pred, ax=ax)
+    ax.set_xlabel("Actual Values")
+    ax.set_ylabel("Predicted Values")
+    ax.set_title("Actual vs Predicted")
+    st.pyplot(fig)
+
