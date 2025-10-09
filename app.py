@@ -109,7 +109,15 @@ if uploaded_file is not None:
     y = df[target_col]
 
     if handle_missing:
-        X = X.fillna(X.mean())
+    # Fill numeric columns with mean
+    X_numeric = X.select_dtypes(include=['number'])
+    X[X_numeric.columns] = X_numeric.fillna(X_numeric.mean())
+
+    # Fill non-numeric columns with mode (most frequent value)
+    X_non_numeric = X.select_dtypes(exclude=['number'])
+    for col in X_non_numeric.columns:
+        if X_non_numeric[col].isnull().any():
+            X[col].fillna(X_non_numeric[col].mode()[0], inplace=True)
 
     if scale_data:
         scaler = StandardScaler()
