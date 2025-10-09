@@ -6,3 +6,6 @@ setuptools
 scipy
 matplotlib
 numpy
+scikit-learn
+xgboost
+seaborn
