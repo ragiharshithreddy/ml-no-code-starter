@@ -107,21 +107,51 @@ if uploaded_file is not None:
     # Prepare data
     X = df[feature_cols]
     y = df[target_col]
+    
+    from sklearn.preprocessing import LabelEncoder, StandardScaler
+    import pandas as pd
 
+# Handle missing values
     if handle_missing:
-    # Fill numeric columns with mean
         X_numeric = X.select_dtypes(include=['number'])
         X[X_numeric.columns] = X_numeric.fillna(X_numeric.mean())
 
-    # Fill non-numeric columns with mode (most frequent value)
         X_non_numeric = X.select_dtypes(exclude=['number'])
         for col in X_non_numeric.columns:
             if X_non_numeric[col].isnull().any():
                 X[col].fillna(X_non_numeric[col].mode()[0], inplace=True)
 
+# Encoding Options
+    encoding_method = st.selectbox(
+        "Select Encoding Method for Categorical Features",
+        ["One-Hot Encoding", "Label Encoding", "Value Encoding (Ordinal)"]
+    )
+
+    if encoding_method == "One-Hot Encoding":
+        X = pd.get_dummies(X, drop_first=True)
+
+    elif encoding_method == "Label Encoding":
+        le = LabelEncoder()
+        for col in X.select_dtypes(include=['object', 'category']).columns:
+            X[col] = le.fit_transform(X[col].astype(str))
+
+    elif encoding_method == "Value Encoding (Ordinal)":
+        for col in X.select_dtypes(include=['object', 'category']).columns:
+            unique_vals = list(X[col].unique())
+            mapping = {val: i for i, val in enumerate(unique_vals)}
+            X[col] = X[col].map(mapping)
+            st.write(f"🔢 Ordinal mapping for `{col}`:", mapping)
+
+# Encode target variable if needed
+    if y.dtype == 'object':
+        le_target = LabelEncoder()
+        y = le_target.fit_transform(y)
+
+# Scale numeric features
     if scale_data:
         scaler = StandardScaler()
-        X = pd.DataFrame(scaler.fit_transform(X), columns=feature_cols)
+        X = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
+
 
     X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=(1 - split_ratio), random_state=42)
 
