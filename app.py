@@ -32,10 +32,9 @@ if uploaded_file is not None:
     # ===============================================
     st.subheader("📊 Automated EDA Report")
     with st.spinner("Generating profiling report..."):
-        profile = ProfileReport(df, explorative=True)
-        profile.to_file("report.html")
-        with open("report.html", "r", encoding="utf-8") as f:
-            html(f.read(), height=600, scrolling=True)
+        profile = ProfileReport(df, explorative=True, minimal=True, correlations={"auto": {"calculate": False}})
+        report_html = profile.to_html()
+        html(report_html, height=600, scrolling=True)
 
     # ===============================================
     # Quick Chart
