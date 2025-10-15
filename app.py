@@ -52,19 +52,63 @@ if uploaded_file is not None:
     # ===============================================
     # Quick Chart
     # ===============================================
-    st.subheader("📈 Quick Chart")
-    cols = df.columns.tolist()
-    if len(cols) >= 2:
-        x_axis = st.selectbox("Select X-axis", options=cols)
-        y_axis = st.selectbox("Select Y-axis", options=cols)
-        if st.button("Plot Chart"):
-            try:
-                fig = px.scatter(df, x=x_axis, y=y_axis)
-                st.plotly_chart(fig, use_container_width=True)
-            except Exception as e:
-                st.error(f"Chart generation failed: {e}")
+    st.subheader("📊 Flexible Charting")
+
+if uploaded_file is not None and len(df.columns) >= 1:
+    chart_type = st.selectbox(
+        "Select Chart Type",
+        ["Scatter", "Line", "Bar", "Histogram", "Box", "Pie"]
+    )
+
+    # Columns for axes
+    x_axis = st.selectbox("X-axis", options=df.columns, index=0)
+    y_axis = st.selectbox("Y-axis", options=df.columns, index=min(1, len(df.columns)-1))
+
+    chart_title = st.text_input("Chart Title", value=f"{chart_type} Chart")
+    x_label = st.text_input("X-axis Label", value=x_axis)
+    y_label = st.text_input("Y-axis Label", value=y_axis)
+
+    # Color palette options
+    color_cols = df.select_dtypes(include=['object', 'category']).columns.tolist()
+    color_col = st.selectbox("Color Column (Optional)", options=[None] + color_cols)
+
+    palette_options = ["Plotly", "Viridis", "Cividis", "Plasma", "Inferno", "Magma", "Pastel1", "Set1"]
+    color_palette = st.selectbox("Color Palette", palette_options)
+
+    if st.button("Generate Chart"):
+        try:
+            fig = None
+            if chart_type == "Scatter":
+                fig = px.scatter(df, x=x_axis, y=y_axis, color=color_col, color_continuous_scale=color_palette, title=chart_title)
+            elif chart_type == "Line":
+                fig = px.line(df, x=x_axis, y=y_axis, color=color_col, color_continuous_scale=color_palette, title=chart_title)
+            elif chart_type == "Bar":
+                fig = px.bar(df, x=x_axis, y=y_axis, color=color_col, color_continuous_scale=color_palette, title=chart_title)
+            elif chart_type == "Histogram":
+                fig = px.histogram(df, x=x_axis, color=color_col, color_discrete_sequence=px.colors.qualitative.Set1, title=chart_title)
+            elif chart_type == "Box":
+                fig = px.box(df, x=x_axis, y=y_axis, color=color_col, color_discrete_sequence=px.colors.qualitative.Set2, title=chart_title)
+            elif chart_type == "Pie":
+                fig = px.pie(df, names=x_axis, values=y_axis, color=color_col, color_discrete_sequence=px.colors.qualitative.Set3, title=chart_title)
+
+            st.plotly_chart(fig, use_container_width=True)
+
+            # Download chart
+            st.markdown("### ⬇️ Download Chart")
+            import io
+            img_bytes = fig.to_image(format="png")
+            st.download_button(
+                label="Download PNG",
+                data=img_bytes,
+                file_name=f"{chart_type}_chart.png",
+                mime="image/png"
+            )
+
+        except Exception as e:
+            st.error(f"Chart generation failed: {e}")
     else:
-        st.warning("Need at least two columns to generate a chart.")
+        st.warning("Upload a CSV with at least one column to use charting.")
+
 
     # ===============================================
     # Model Training
