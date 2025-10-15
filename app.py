@@ -390,41 +390,80 @@ with tab_train:
 
         if model_type == "Classification":
             
-            # Classification Metrics
-            col_acc, col_f1, col_prec, col_rec = st.columns(4)
-            acc = accuracy_score(y_test, y_pred)
-            report = classification_report(y_test, y_pred, output_dict=True)
+            # --- FIX FOR KeyError: 'micro avg' ---
             
-            with col_acc: st.metric("Accuracy", f"{acc*100:.2f}%")
+            # 1. Check for single class in test set
+            unique_classes_test = len(np.unique(y_test))
             
-            # Micro-average for general F1, precision, recall
-            with col_f1: st.metric("Micro F1-Score", f"{report['micro avg']['f1-score']:.4f}")
-            with col_prec: st.metric("Micro Precision", f"{report['micro avg']['precision']:.4f}")
-            with col_rec: st.metric("Micro Recall", f"{report['micro avg']['recall']:.4f}")
-
-            # Confusion Matrix Visualization
-            st.markdown("### 📉 Confusion Matrix")
-            try:
-                cm = confusion_matrix(y_test, y_pred)
-                fig, ax = plt.subplots()
+            if unique_classes_test < 2:
+                st.warning("⚠️ Warning: Only one class found in the test set. Micro/Macro F1-scores cannot be calculated. Displaying Accuracy only.")
+                acc = accuracy_score(y_test, y_pred)
+                st.metric("Accuracy", f"{acc*100:.2f}%")
                 
-                # Get class labels for display
-                labels = target_classes if target_classes is not None else np.unique(y_test)
+                # Skip the remaining metric/report generation to prevent the error
+                report = {} # Initialize empty report to avoid a crash later
+            else:
+                # 2. Proceed with full report generation
+                col_acc, col_f1, col_prec, col_rec = st.columns(4)
+                acc = accuracy_score(y_test, y_pred)
                 
-                sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax, 
-                            xticklabels=labels, yticklabels=labels)
-                ax.set_ylabel("True Label")
-                ax.set_xlabel("Predicted Label")
-                st.pyplot(fig)
-            except Exception as e:
-                 st.error(f"Could not plot confusion matrix: {e}")
+                # Check for zero_division='warn' and set explicit target_names for robustness
+                target_names = target_classes if target_classes is not None else [str(i) for i in np.unique(y_test)]
 
-            st.markdown("### 📋 Classification Report")
-            # Convert report to DataFrame and remove redundant/unnecessary keys for display
-            report_df = pd.DataFrame(report).transpose()
-            if 'accuracy' in report_df.index:
-                report_df = report_df.drop('accuracy')
-            st.dataframe(report_df, use_container_width=True)
+                try:
+                    report = classification_report(y_test, y_pred, output_dict=True, zero_division=0, target_names=target_names)
+                except Exception as e:
+                    st.error(f"Failed to generate full classification report: {e}")
+                    report = {} # Ensure report is still defined
+
+                
+                with col_acc: st.metric("Accuracy", f"{acc*100:.2f}%")
+                
+                # 3. Safely access micro/weighted average
+                # Use 'weighted avg' as a fallback if 'micro avg' isn't available, or check if key exists
+                
+                if 'micro avg' in report:
+                    micro_f1 = report['micro avg']['f1-score']
+                    micro_precision = report['micro avg']['precision']
+                    micro_recall = report['micro avg']['recall']
+                elif 'weighted avg' in report:
+                    # Fallback to weighted avg if micro is missing (e.g., in some binary cases)
+                    st.warning("Could not find 'micro avg'. Using 'weighted avg' for general metrics.")
+                    micro_f1 = report['weighted avg']['f1-score']
+                    micro_precision = report['weighted avg']['precision']
+                    micro_recall = report['weighted avg']['recall']
+                else:
+                    st.warning("Could not calculate F1/Precision/Recall averages.")
+                    micro_f1, micro_precision, micro_recall = acc, acc, acc # Default to accuracy value
+
+                with col_f1: st.metric("Micro F1-Score", f"{micro_f1:.4f}")
+                with col_prec: st.metric("Micro Precision", f"{micro_precision:.4f}")
+                with col_rec: st.metric("Micro Recall", f"{micro_recall:.4f}")
+
+                # Confusion Matrix Visualization
+                st.markdown("### 📉 Confusion Matrix")
+                # ... (Confusion Matrix plotting logic remains the same) ...
+                try:
+                    cm = confusion_matrix(y_test, y_pred)
+                    fig, ax = plt.subplots()
+                    
+                    # Get class labels for display
+                    labels = target_classes if target_classes is not None else np.unique(y_test)
+                    
+                    sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", ax=ax, 
+                                xticklabels=labels, yticklabels=labels)
+                    ax.set_ylabel("True Label")
+                    ax.set_xlabel("Predicted Label")
+                    st.pyplot(fig)
+                except Exception as e:
+                    st.error(f"Could not plot confusion matrix: {e}")
+
+                st.markdown("### 📋 Classification Report")
+                # Convert report to DataFrame and remove redundant/unnecessary keys for display
+                report_df = pd.DataFrame(report).transpose()
+                if 'accuracy' in report_df.index:
+                    report_df = report_df.drop('accuracy')
+                st.dataframe(report_df, use_container_width=True)
 
         else:
             # Regression Metrics
