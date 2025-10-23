@@ -548,19 +548,16 @@ if st.session_state.page == 'train':
         st.warning("For Gmail, you must use a 16-digit 'App Password'. Do not use your regular password.")
         
         col_em1, col_em2 = st.columns(2)
+        
+        # ***************************************************************
+        # --- UNCOMMENTED SMTP CREDENTIAL INPUTS ARE BELOW ---
+        # ***************************************************************
         with col_em1:
-            # --- CREDENTIALS COMMENTED OUT AS REQUESTED ---
-            # sender_email = st.text_input("Sender Email (e.g., your-email@gmail.com)", key="smtp_sender")
-            # recipient_email = st.text_input("Recipient Email", key="smtp_recipient")
-            sender_email = None # Set to None
-            recipient_email = None # Set to None
-            st.info("Email inputs are commented out in the code.")
+            sender_email = st.text_input("Sender Email (e.g., your-email@gmail.com)", key="smtp_sender")
+            recipient_email = st.text_input("Recipient Email", key="smtp_recipient")
 
         with col_em2:
-            # --- CREDENTIALS COMMENTED OUT AS REQUESTED ---
-            # app_password = st.text_input("Sender App Password", type="password", key="smtp_password")
-            app_password = None # Set to None
-            st.info("Password input is commented out.")
+            app_password = st.text_input("Sender App Password", type="password", key="smtp_password")
 
 
     # --- Training Button & Logic ---
@@ -916,7 +913,6 @@ if _name_ == "_main_":
                         st.warning(f"Could not plot feature importance: {e}")
             
             # --- Send Email Notification ---
-            # This check will now fail since sender_email is None
             if sender_email and app_password and recipient_email:
                 status.write("Sending email notification...")
                 success, message = send_email_notification(
@@ -928,7 +924,7 @@ if _name_ == "_main_":
                 else:
                     status.warning(f"⚠ {message}")
             else:
-                status.write("Skipping email: Not all SMTP fields were provided (inputs are commented out).")
+                status.write("Skipping email: Not all SMTP fields were provided.")
             
             # Final status update
             status.update(label="✅ Training Pipeline Completed!", state="complete", expanded=False)
