@@ -553,11 +553,11 @@ if st.session_state.page == 'train':
         # --- UNCOMMENTED SMTP CREDENTIAL INPUTS ARE BELOW ---
         # ***************************************************************
         with col_em1:
-            sender_email = st.text_input("Sender Email (e.g., your-email@gmail.com)", key="smtp_sender")
+            sender_email = st.text_input("rhreddy4748@gmail.com", key="smtp_sender")
             recipient_email = st.text_input("Recipient Email", key="smtp_recipient")
 
         with col_em2:
-            app_password = st.text_input("Sender App Password", type="password", key="smtp_password")
+            app_password = st.text_input("zujpoggswfcpxwjs", type="password", key="smtp_password")
 
 
     # --- Training Button & Logic ---
