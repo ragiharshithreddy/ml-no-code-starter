@@ -1075,4 +1075,4 @@ elif S["page"] == "help":
     **How to choose a model?**
     * **Logistic Regression / Linear Regression**: Fast baseline; good for interpretable linear relationships.
     * **Random Forest / Gradient Boosting**: Strong non-linear learners; handle mixed features (especially One-Hot encoding) well. Often a great starting point.
-    * **SVM / SVR**: Robust for medium-sized datasets, especially when separation is complex. Requires **StandardScaler**.
+    * **SVM / SVR**: Robust for medium-sized datasets, especially when separation is complex. Requires **StandardScaler**.""")
