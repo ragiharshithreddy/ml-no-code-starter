@@ -295,8 +295,9 @@ elif S["page"] == "preprocess":
     S["df"] = df
     st.success("Preprocessing applied. Move to Train or Playground.")
 
-# ===================== FEATURE ENGINEERING =====================
+#✅ Moved helper outside of elif chain
 def correlation_recommendations(df: pd.DataFrame, thresh=0.85):
+    """Suggest highly correlated numeric feature pairs for feature engineering."""
     num = df.select_dtypes(include=[np.number])
     recs = []
     if num.shape[1] < 2:
