@@ -6,7 +6,6 @@
 # - Per‑model help + parameter tooltips
 # - Visual playgrounds for every model
 # - Email results to the user from owner Gmail (configure constants below)
-
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -305,7 +304,8 @@ def correlation_recommendations(df: pd.DataFrame, thresh=0.85):
     corr = num.corr()
     for i, c1 in enumerate(corr.columns):
         for j, c2 in enumerate(corr.columns):
-            if j <= i: continue
+            if j <= i:
+                continue
             v = corr.iloc[i, j]
             if abs(v) >= thresh:
                 recs.append((c1, c2, float(v)))
