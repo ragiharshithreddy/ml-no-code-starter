@@ -1,528 +1,623 @@
+# AutoMLPilot Pro — colorful no‑code ML lab with playgrounds
+# -----------------------------------------------------------
+# - Supervised (classification/regression) + Unsupervised (clustering/anomaly/dim‑red)
+# - Rich preprocessing: imputation, encoding, scaling, outliers, balancing (SMOTE*), feature selection
+# - Feature engineering: recommendations from correlation + arithmetic creator
+# - Per‑model help + parameter tooltips
+# - Visual playgrounds for every model
+# - Email results to the user from owner Gmail (configure constants below)
+
 import streamlit as st
 import pandas as pd
-import plotly.express as px
-from streamlit.components.v1 import html
-from sklearn.model_selection import train_test_split, cross_val_score
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.metrics import (
-    accuracy_score, confusion_matrix, classification_report,
-    mean_squared_error, r2_score
-)
-from sklearn.linear_model import LogisticRegression, LinearRegression, SGDRegressor
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor, GradientBoostingClassifier, GradientBoostingRegressor
-from sklearn.tree import DecisionTreeRegressor
-from sklearn.svm import SVC, SVR
-from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
-from sklearn.naive_bayes import GaussianNB
-from sklearn.neural_network import MLPClassifier, MLPRegressor
-import matplotlib.pyplot as plt
 import numpy as np
-import time
-import os
-import json
-import ssl
-import smtplib
+import plotly.express as px
+import plotly.graph_objects as go
+import matplotlib.pyplot as plt
+import seaborn as sns
+from streamlit.components.v1 import html
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import (
+    StandardScaler, MinMaxScaler, RobustScaler, Normalizer, LabelEncoder
+)
+from sklearn.feature_selection import VarianceThreshold
+from sklearn.metrics import (
+    accuracy_score, f1_score, classification_report, confusion_matrix,
+    r2_score, mean_squared_error, silhouette_score
+)
+from sklearn.decomposition import PCA
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
+from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
+from sklearn.svm import SVC, SVR
+from sklearn.ensemble import (
+    RandomForestClassifier, RandomForestRegressor,
+    GradientBoostingClassifier, GradientBoostingRegressor,
+    IsolationForest
+)
+from sklearn.linear_model import (
+    LogisticRegression, LinearRegression, Ridge, Lasso, ElasticNet
+)
+from sklearn.naive_bayes import GaussianNB
+from sklearn.tree import DecisionTreeClassifier, DecisionTreeRegressor
+from sklearn.cluster import KMeans, DBSCAN, AgglomerativeClustering
+from sklearn.mixture import GaussianMixture
+
+# Optional libs
+try:
+    from ydata_profiling import ProfileReport
+    YDATA_OK = True
+except Exception:
+    YDATA_OK = False
+
+try:
+    from xgboost import XGBClassifier, XGBRegressor
+    XGB_OK = True
+except Exception:
+    XGB_OK = False
+
+try:
+    from imblearn.over_sampling import SMOTE
+    IMB_OK = True
+except Exception:
+    IMB_OK = False
+
+import smtplib, ssl, json, time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
-# Optional external libs
-try:
-    from xgboost import XGBClassifier, XGBRegressor
-    XGB_AVAILABLE = True
-except Exception:
-    XGB_AVAILABLE = False
+# ===================== OWNER EMAIL (sender) =====================
+OWNER_GMAIL = "rhreddy4748@gmail.com"           # Gmail address (sender)
+OWNER_APP_PASSWORD = "zujpoggswfcpxwjs"        # Gmail App password
+OWNER_ALIAS = "noreply@automlpilot.com"         # Displayed From address
+SENDER_NAME = "AutoMLPilot"
 
-# ==================== PAGE / THEME ====================
-st.set_page_config(
-    page_title="No-Code ML Explorer",
-    layout="wide",
-    page_icon="✨",
-)
+# ===================== PAGE CONFIG & THEME =====================
+st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
 
-# -------------------- CSS: fixed navbar & glass UI --------------------
-TEMPLATE_CSS = """
+THEME = """
 <style>
-    :root { --glass: rgba(255,255,255,0.10); --border: rgba(255,255,255,0.18); }
-    .block-container {padding: 0 1.2rem 2rem 1.2rem;}
-    .main { background: linear-gradient(120deg, #0f172a, #1e293b) fixed; }
-    h1,h2,h3,h4 { color: #e5e7eb; }
-    .muted { color:#cbd5e1; }
-
-    /* Fixed top bar */
-    .topbar { position: sticky; top: 0; z-index: 1000; backdrop-filter: blur(10px);
-              background: linear-gradient(90deg, rgba(2,6,23,0.75), rgba(15,23,42,0.75));
-              border-bottom: 1px solid var(--border); padding: 0.75rem 0.8rem; }
-    .topbar-inner { display:flex; align-items:center; justify-content:space-between; }
-    .brand { display:flex; align-items:center; gap:.6rem; }
-    .brand .title { font-weight:800; font-size:1.05rem; color:#f8fafc; }
-    .pill { display:inline-block; padding:4px 10px; border-radius:999px; background:rgba(255,255,255,0.08); border:1px solid var(--border); color:#e5e7eb; font-size:12px; }
-
-    /* Left sidebar nav mimic */
-    .side { position: sticky; top: 54px; }
-    .nav { background: var(--glass); border:1px solid var(--border); border-radius:16px; padding:10px; }
-    .nav a { display:block; padding:.55rem .8rem; margin:.2rem 0; border-radius:10px; text-decoration:none; color:#e5e7eb; }
-    .nav a.active, .nav a:hover { background: rgba(139,92,246,0.18); }
-
-    .card { background: var(--glass); border:1px solid var(--border); border-radius:18px; box-shadow: 0 8px 28px rgba(0,0,0,.25); padding:16px; }
-    .metric { background: rgba(255,255,255,0.06); border-left:4px solid #8b5cf6; border-radius:12px; padding:10px; color:#e5e7eb; }
-
-    /* File input align */
-    .row { display:flex; gap:12px; align-items:center; }
+  :root { --bg1: #ffe5f0; --bg2: #e6e9ff; --card: rgba(255,255,255,0.65); --border: rgba(255,255,255,0.35); }
+  .main { background: radial-gradient(1200px 600px at 10% 10%, var(--bg1), transparent),
+                         radial-gradient(900px 500px at 90% 20%, var(--bg2), transparent),
+                         linear-gradient(120deg,#f9fafb,#eef2ff); }
+  .block-container { padding: 1rem 2rem; }
+  h1,h2,h3,h4 { color:#0f172a; }
+  .topbar { position: sticky; top:0; z-index:1000; backdrop-filter: blur(12px);
+            background: linear-gradient(90deg, rgba(255,255,255,0.85), rgba(255,255,255,0.6));
+            border-bottom:1px solid var(--border); padding:.6rem 1rem; border-radius: 14px; }
+  .chip { display:inline-block; padding:.25rem .6rem; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; font-size:.8rem; }
+  .card { background: var(--card); border:1px solid var(--border); border-radius:20px; box-shadow: 0 12px 35px rgba(31,41,55,.12); padding:16px; }
+  .metric { background: rgba(255,255,255,0.75); border-left:4px solid #8b5cf6; border-radius:14px; padding:12px; }
+  .pillbtn button { border-radius:999px !important; }
+  .small { color:#475569; font-size:.85rem; }
+  .tooltip { color:#6b7280; font-size:.85rem; }
 </style>
 """
 
-st.markdown(TEMPLATE_CSS, unsafe_allow_html=True)
+st.markdown(THEME, unsafe_allow_html=True)
 
-# ==================== SIMPLE IN-APP LOGIN (for SMTP owner) ====================
-DEFAULT_EMAIL = "rhreddy4748@gmail.com"  # You can change this default
-DEFAULT_APP_PASSWORD = "zujpoggswfcpxwjs"  # Gmail App Password (avoid sharing publicly)
+# ===================== HELPERS =====================
+def send_results_email(to_email: str, subject: str, results: dict, extra_html: str = ""):
+    if not to_email or "@" not in to_email:
+        st.warning("Please enter a valid email.")
+        return False
+    try:
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = subject
+        msg["From"] = f"{SENDER_NAME} <{OWNER_ALIAS}>"
+        msg["To"] = to_email
+        html_body = f"""
+        <html><body style='font-family:Inter,system-ui'>
+          <h2 style='color:#7c3aed;margin:0'>Your AutoMLPilot Results</h2>
+          {extra_html}
+          <pre style='background:#0b1220;color:#e5e7eb;border:1px solid #1f2937;padding:12px;border-radius:10px'>
+{json.dumps(results, indent=2)}
+          </pre>
+        </body></html>
+        """
+        msg.attach(MIMEText(html_body, "html"))
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx) as s:
+            s.login(OWNER_GMAIL, OWNER_APP_PASSWORD)
+            s.sendmail(OWNER_GMAIL, to_email, msg.as_string())
+        return True
+    except Exception as e:
+        st.error(f"Email failed: {e}")
+        return False
 
-if "ui" not in st.session_state:
-    st.session_state.ui = {
+@st.cache_data(show_spinner=False)
+def profile_html(df: pd.DataFrame) -> str:
+    if not YDATA_OK:
+        return "<p class='small'>Install ydata-profiling to enable full EDA.</p>"
+    pr = ProfileReport(df, explorative=True, minimal=True)
+    return pr.to_html()
+
+# ===================== SESSION =====================
+if "S" not in st.session_state:
+    st.session_state.S = {
         "page": "dashboard",
-        "authed": False,
-        "email": DEFAULT_EMAIL,
-        "app_password": DEFAULT_APP_PASSWORD,
-        # data & model state
-        "original_df": None,
         "df": None,
         "target": None,
-        "features": [],
         "task": "Classification",
-        "encoding": "One-Hot",
-        "scaler": None,
-        "encoders": {},
-        "ohe_cols": None,
-        "final_cols": None,
+        "user_email": "",
+        "corr_pairs": [],
+        "features_created": [],
+        # training artifacts
         "model": None,
-        "target_encoder": None,
-        "target_classes": None,
+        "final_cols": None,
+        "label_encoders": {},
+        "scaler_name": None,
         "results": {},
+        # unsupervised
+        "unsup_labels": None,
     }
-S = st.session_state.ui
+S = st.session_state.S
 
-# -------------------- Top bar --------------------
-st.markdown(
-    """
-    <div class="topbar">
-      <div class="topbar-inner">
-        <div class="brand">
-          <span>✨</span>
-          <span class="title">No‑Code ML Explorer</span>
-          <span class="pill">Dashboard</span>
+# ===================== TOP BAR =====================
+with st.container():
+    st.markdown("""
+    <div class='topbar'>
+      <div style='display:flex;justify-content:space-between;align-items:center'>
+        <div style='display:flex;gap:.6rem;align-items:center'>
+          <span>🌈</span>
+          <strong>AutoMLPilot Pro</strong>
+          <span class='chip'>No‑Code AI Lab</span>
         </div>
-        <div class="brand">
-          <span class="pill">Dark</span>
-          <span class="pill">{email}</span>
+        <div style='display:flex;gap:8px;align-items:center'>
+          <span class='chip'>Playground</span>
+          <span class='chip'>EDA</span>
+          <span class='chip'>Email Reports</span>
         </div>
       </div>
     </div>
-    """.format(email=S["email"] if S["authed"] else "guest@local"),
-    unsafe_allow_html=True,
-)
+    """, unsafe_allow_html=True)
 
-# ==================== SIDEBAR NAV ====================
+# ===================== SIDEBAR NAV =====================
 with st.sidebar:
-    st.markdown("<div class='side'>", unsafe_allow_html=True)
-    st.markdown("### NAVIGATION")
-    def nav_btn(name, key):
-        active = (S["page"] == key)
-        if st.button(("👉 " if active else "") + name, use_container_width=True):
-            S["page"] = key
-            st.experimental_rerun()
-    nav_btn("Dashboard", "dashboard")
-    nav_btn("Preprocess", "preprocess")
-    nav_btn("Model Selection", "train")
-    nav_btn("Results", "results")
-    nav_btn("Settings", "settings")
+    st.subheader("Navigation")
+    pg = st.radio("", ["dashboard","preprocess","train","playground","unsupervised","results","help"],
+                  format_func=lambda x: {
+                      "dashboard":"📁 Dashboard",
+                      "preprocess":"🧹 Preprocess",
+                      "train":"🧠 Train (Supervised)",
+                      "playground":"🎨 Playground (Supervised)",
+                      "unsupervised":"🧩 Unsupervised",
+                      "results":"📊 Results",
+                      "help":"❓ Help"
+                  }[x])
+    S["page"] = pg
 
-    st.markdown("---")
-    st.caption("Pro Version — Unlock features")
-    st.markdown("</div>", unsafe_allow_html=True)
-
-# ==================== AUTH CARD (Google-style simulated) ====================
-if not S["authed"]:
-    with st.container():
-        st.markdown("### 🔐 Sign in to enable email notifications")
-        with st.form("login_form"):
-            st.text_input("Gmail address", value=S["email"], key="email_input")
-            st.text_input("Gmail App password", type="password", value=S["app_password"], key="pwd_input")
-            st.caption("We only use this to send training results via SMTP over SSL. Stored in session only.")
-            if st.form_submit_button("Sign in", type="primary"):
-                S["email"] = st.session_state.get("email_input", "")
-                S["app_password"] = st.session_state.get("pwd_input", "")
-                S["authed"] = True
-                st.success("Signed in. You can change this later in Settings.")
-    st.write("---")
-
-# ==================== DASHBOARD ====================
+# ===================== DASHBOARD =====================
 if S["page"] == "dashboard":
-    c1, c2 = st.columns([2.5, 1])
+    st.title("Dashboard")
+    c1, c2 = st.columns([2.2, 1])
     with c1:
-        st.markdown("#### Upload Dataset")
-        with st.container():
-            upcol1, upcol2 = st.columns([4,1])
-            with upcol1:
-                uploaded = st.file_uploader("Choose CSV", type=["csv"], label_visibility="collapsed")
-            with upcol2:
-                st.write("\n")
-                if st.button("Upload", type="primary", use_container_width=True):
-                    if uploaded is None:
-                        st.warning("Please choose a CSV file first.")
-                    else:
-                        try:
-                            new_df = pd.read_csv(uploaded)
-                            S["original_df"] = new_df
-                            S["df"] = new_df.copy()
-                            S["target"] = None
-                            S["features"] = []
-                            S["model"] = None
-                            st.success("File uploaded!")
-                            S["page"] = "preprocess"
-                            st.experimental_rerun()
-                        except Exception as e:
-                            st.error(f"Failed: {e}")
-        st.caption("ML Training: CSV. Preview-only: JSON & images (future). Storage: uploads/ → results/")
-
-        t1, t2 = st.columns(2)
-        with t1:
-            S["task"] = st.selectbox("Task Type", ["Classification", "Regression"], index=["Classification","Regression"].index(S["task"]))
-        with t2:
-            target_placeholder = "e.g., label" if S["task"] == "Classification" else "e.g., price"
-            if S["df"] is not None:
-                S["target"] = st.selectbox("Target Column *", [None] + S["df"].columns.tolist(), index=0 if S["target"] is None else 1 + list(S["df"].columns).index(S["target"]))
-            else:
-                st.text_input("Target Column *", placeholder=target_placeholder, disabled=True)
-
-        b1, b2 = st.columns([1,1])
-        with b1:
-            if st.button("🧹 Preprocess →", use_container_width=True):
-                S["page"] = "preprocess"
-                st.experimental_rerun()
-        with b2:
-            if st.button("⚡ Quick Train", use_container_width=True):
-                if S["df"] is None or S["target"] is None:
-                    st.warning("Upload data and pick target first.")
-                else:
-                    st.info("Running quick baseline (LogReg/Linear vs RandomForest)...")
-                    # very small quick train
-                    DF = S["df"].copy()
-                    y = DF[S["target"]]
-                    X = DF.drop(columns=[S["target"]])
-                    # simple encoding
-                    X = pd.get_dummies(X)
-                    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-                    if S["task"] == "Classification":
-                        model = RandomForestClassifier(n_estimators=150, random_state=42)
-                    else:
-                        model = RandomForestRegressor(n_estimators=200, random_state=42)
-                    model.fit(X_train, y_train)
-                    S["model"] = model
-                    S["final_cols"] = X.columns.tolist()
-                    S["features"] = list(DF.columns.drop(S["target"]))
-                    st.success("Quick model trained. Go to Results or Predict tab.")
+        st.markdown("### Upload Dataset")
+        up = st.file_uploader("CSV only", type=["csv"]) 
+        if up is not None:
+            try:
+                df = pd.read_csv(up)
+                S["df"] = df
+                S["target"] = None
+                st.success(f"Loaded {df.shape[0]} rows × {df.shape[1]} columns")
+            except Exception as e:
+                st.error(f"Failed: {e}")
+        if S["df"] is not None:
+            st.markdown("### Preview")
+            st.dataframe(S["df"].head())
     with c2:
-        st.markdown("#### Recent Datasets")
-        if S["df"] is None:
-            st.info("No datasets yet. Upload to get started!")
-        else:
-            st.write("• current.csv — ", S["df"].shape)
+        st.markdown("### Email for Reports")
+        S["user_email"] = st.text_input("User email (recipient)", value=S["user_email"], placeholder="you@example.com")
+        st.info("Results will be sent from AutoMLPilot (owner Gmail).")
+    st.markdown("---")
+    st.markdown("### One‑click EDA Report")
+    if S["df"] is not None:
+        if st.button("Generate EDA", type="primary"):
+            html(profile_html(S["df"]), height=600, scrolling=True)
 
-# ==================== PREPROCESS ====================
+# ===================== PREPROCESS =====================
 elif S["page"] == "preprocess":
-    st.markdown("### 🧹 Preprocess")
+    st.title("Preprocessing Studio")
     if S["df"] is None:
         st.info("Upload a dataset first.")
         st.stop()
-    DF = S["df"].copy()
+    df = S["df"].copy()
 
-    with st.expander("Drop columns", expanded=True):
-        cols_drop = st.multiselect("Columns to drop", DF.columns.tolist())
-        c1, c2 = st.columns(2)
-        with c1:
-            if st.button("Apply drop", type="primary") and cols_drop:
-                DF.drop(columns=cols_drop, inplace=True, errors="ignore")
-                S["df"] = DF
-                st.experimental_rerun()
-        with c2:
-            if st.button("Reset to original"):
-                S["df"] = S["original_df"].copy()
-                st.experimental_rerun()
+    with st.expander("1) Handle Missing Values", expanded=True):
+        strategy = st.selectbox("Strategy", ["None","Mean","Median","Most_frequent"])
+        if strategy != "None":
+            num_cols = df.select_dtypes(include=[np.number]).columns
+            cat_cols = df.select_dtypes(exclude=[np.number]).columns
+            if strategy in ("Mean","Median") and len(num_cols)==0:
+                st.warning("No numeric columns for mean/median.")
+            else:
+                imputer_num = SimpleImputer(strategy=strategy.lower()) if strategy!="Most_frequent" else SimpleImputer(strategy="most_frequent")
+                if len(num_cols):
+                    df[num_cols] = imputer_num.fit_transform(df[num_cols])
+                if len(cat_cols):
+                    imputer_cat = SimpleImputer(strategy="most_frequent")
+                    df[cat_cols] = imputer_cat.fit_transform(df[cat_cols])
+                st.success("Missing values imputed.")
 
-    with st.expander("Missing values", expanded=True):
-        miss = DF.isna().sum()
-        miss = miss[miss > 0]
-        if miss.empty:
-            st.info("No missing values detected.")
+    with st.expander("2) Outliers (IQR remove)"):
+        if st.checkbox("Remove outliers using IQR (numeric only)"):
+            num_cols = df.select_dtypes(include=[np.number]).columns
+            before = len(df)
+            for col in num_cols:
+                q1, q3 = df[col].quantile([0.25, 0.75])
+                iqr = q3 - q1
+                lower, upper = q1 - 1.5*iqr, q3 + 1.5*iqr
+                df = df[(df[col] >= lower) & (df[col] <= upper)]
+            st.success(f"Removed {before - len(df)} rows as outliers.")
+
+    with st.expander("3) Encoding", expanded=True):
+        enc = st.selectbox("Categorical encoding", ["None","One-Hot","Label"])
+        if enc == "One-Hot":
+            df = pd.get_dummies(df)
+            st.info("Applied one‑hot encoding.")
+        elif enc == "Label":
+            for c in df.select_dtypes(include=["object","category"]).columns:
+                le = LabelEncoder()
+                df[c] = le.fit_transform(df[c].astype(str))
+            st.info("Applied label encoding.")
+
+    with st.expander("4) Scaling", expanded=False):
+        scale = st.selectbox("Scaler", ["None","Standard","MinMax","Robust","Normalize"])
+        if scale != "None":
+            scaler = {
+                "Standard": StandardScaler(),
+                "MinMax": MinMaxScaler(),
+                "Robust": RobustScaler(),
+                "Normalize": Normalizer(),
+            }[scale]
+            num_cols = df.select_dtypes(include=[np.number]).columns
+            df[num_cols] = scaler.fit_transform(df[num_cols])
+            S["scaler_name"] = scale
+            st.info(f"Applied {scale} scaling to numeric columns.")
+
+    with st.expander("5) Feature Selection (VarianceThreshold)"):
+        if st.checkbox("Remove near‑constant features"):
+            thr = st.slider("Variance threshold", 0.0, 0.2, 0.0, 0.01)
+            selector = VarianceThreshold(threshold=thr)
+            arr = selector.fit_transform(df.select_dtypes(include=[np.number]))
+            kept = df.select_dtypes(include=[np.number]).columns[selector.get_support(indices=True)]
+            nonnum = df.select_dtypes(exclude=[np.number])
+            df = pd.concat([pd.DataFrame(arr, columns=kept), nonnum.reset_index(drop=True)], axis=1)
+            st.success(f"Kept {len(kept)} numeric features.")
+
+    with st.expander("6) Balancing (SMOTE)"):
+        if not IMB_OK:
+            st.caption("Install imbalanced-learn to enable SMOTE.")
         else:
-            st.dataframe(miss.rename("Missing"))
-            how = st.selectbox("Strategy", ["Drop rows", "Mean/Mode impute"]) 
-            if st.button("Fix missing"):
-                if how == "Drop rows":
-                    DF.dropna(inplace=True)
-                else:
-                    for c in miss.index:
-                        if pd.api.types.is_numeric_dtype(DF[c]):
-                            DF[c] = DF[c].fillna(DF[c].mean())
-                        else:
-                            DF[c] = DF[c].fillna(DF[c].mode().iloc[0])
-                S["df"] = DF
-                st.experimental_rerun()
+            st.caption("Applies when you choose a target in Train tab (classification only).")
 
-    with st.expander("Target & features", expanded=True):
-        if S["target"] is None:
-            S["target"] = st.selectbox("Target (y)", DF.columns.tolist())
-        else:
-            S["target"] = st.selectbox("Target (y)", DF.columns.tolist(), index=DF.columns.get_loc(S["target"]))
-        if st.button("Confirm target", type="primary"):
-            S["features"] = [c for c in DF.columns if c != S["target"]]
-            st.success(f"Target set to {S['target']}")
-            S["page"] = "train"
-            st.experimental_rerun()
+    # Save
+    S["df"] = df
+    st.success("Preprocessing applied. Move to Train or Playground.")
 
-# ==================== TRAIN ====================
+# ===================== FEATURE ENGINEERING =====================
+def correlation_recommendations(df: pd.DataFrame, thresh=0.85):
+    num = df.select_dtypes(include=[np.number])
+    recs = []
+    if num.shape[1] < 2:
+        return recs
+    corr = num.corr()
+    for i, c1 in enumerate(corr.columns):
+        for j, c2 in enumerate(corr.columns):
+            if j <= i: continue
+            v = corr.iloc[i, j]
+            if abs(v) >= thresh:
+                recs.append((c1, c2, float(v)))
+    return sorted(recs, key=lambda x: -abs(x[2]))[:20]
+
+# ===================== TRAIN (SUPERVISED) =====================
 elif S["page"] == "train":
-    st.markdown("### 📦 Model Selection & Training")
-    if S["df"] is None or S["target"] is None:
-        st.warning("Please upload data and choose a target first.")
+    st.title("Supervised Training")
+    if S["df"] is None:
+        st.info("Upload data first.")
+        st.stop()
+    df = S["df"].copy()
+
+    # Target selection
+    S["target"] = st.selectbox("Target (y)", [None] + df.columns.tolist(), index=0 if S["target"] is None else 1 + list(df.columns).index(S["target"]))
+    if S["target"] is None:
         st.stop()
 
-    DF = S["df"].copy()
-    target = S["target"]
-    features = [c for c in DF.columns if c != target]
+    # Task
+    task = st.radio("Task", ["Classification","Regression"], horizontal=True)
 
-    with st.expander("Configuration", expanded=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            S["task"] = st.selectbox("Task", ["Classification", "Regression"], index=["Classification","Regression"].index(S["task"]))
-        with c2:
-            model_choices_c = [
-                "LogisticRegression", "RandomForestClassifier", "SVC", "KNeighborsClassifier",
-                "GaussianNB", "MLPClassifier", "GradientBoostingClassifier"
-            ] + (["XGBClassifier"] if XGB_AVAILABLE else [])
-            model_choices_r = [
-                "LinearRegression", "RandomForestRegressor", "SVR", "KNeighborsRegressor",
-                "DecisionTreeRegressor", "MLPRegressor", "GradientBoostingRegressor", "SGDRegressor"
-            ] + (["XGBRegressor"] if XGB_AVAILABLE else [])
-            model_name = st.selectbox("Algorithm", model_choices_c if S["task"]=="Classification" else model_choices_r)
+    # Feature engineering suggestions
+    with st.expander("✨ Feature Recommendations (from correlation)", expanded=False):
+        recs = correlation_recommendations(df.drop(columns=[S["target"]]))
+        if recs:
+            st.dataframe(pd.DataFrame(recs, columns=["Feature A","Feature B","Correlation"]))
+        else:
+            st.caption("No strong pairs found.")
+        st.caption("Create derived features below:")
+        cols = [c for c in df.columns if c != S["target"]]
+        new_name = st.text_input("New feature name", placeholder="e.g., a_div_b")
+        if cols:
+            c1, c2 = st.columns(2)
+            with c1:
+                f1 = st.selectbox("Feature 1", cols)
+                op = st.selectbox("Operation", ["+","-","*","/"])
+            with c2:
+                f2 = st.selectbox("Feature 2", [c for c in cols if c != f1])
+            if st.button("Create feature"):
+                try:
+                    if op=="+": df[new_name] = df[f1] + df[f2]
+                    if op=="-": df[new_name] = df[f1] - df[f2]
+                    if op=="*": df[new_name] = df[f1] * df[f2]
+                    if op=="/": df[new_name] = df[f1] / df[f2].replace(0,np.nan)
+                    S["df"] = df
+                    S["features_created"].append(new_name)
+                    st.success(f"Feature '{new_name}' created.")
+                except Exception as e:
+                    st.error(e)
 
-    with st.expander("Preprocessing", expanded=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            do_scale = st.checkbox("Scale numeric features", value=True)
-            S["encoding"] = st.selectbox("Categorical encoding", ["One-Hot", "Label", "Ordinal"], index=["One-Hot","Label","Ordinal"].index(S["encoding"]))
-        with c2:
-            split = st.slider("Train split", 0.5, 0.95, 0.8)
+    # Model zoo
+    st.markdown("### Choose Model & Params")
+    models_cls = {
+        "LogisticRegression": (LogisticRegression, {
+            "C": (st.slider, {"label":"C (inverse reg strength)", "min_value":0.01, "max_value":10.0, "value":1.0}),
+            "max_iter": (st.slider, {"label":"Max Iter (epochs)", "min_value":50, "max_value":2000, "value":300}),
+            "solver": (st.selectbox, {"label":"Solver", "options":["lbfgs","liblinear"], "index":1}),
+        }),
+        "RandomForestClassifier": (RandomForestClassifier, {
+            "n_estimators": (st.slider, {"label":"Trees", "min_value":50, "max_value":800, "value":200}),
+            "max_depth": (st.slider, {"label":"Max depth", "min_value":1, "max_value":60, "value":None}),
+            "random_state": (st.number_input, {"label":"Random State", "value":42}),
+        }),
+        "SVC": (SVC, {
+            "C": (st.slider, {"label":"C", "min_value":0.01, "max_value":10.0, "value":1.0}),
+            "kernel": (st.selectbox, {"label":"Kernel", "options":["rbf","linear","poly"], "index":0}),
+            "probability": (st.checkbox, {"label":"Enable probability", "value":True}),
+        }),
+        "KNeighborsClassifier": (KNeighborsClassifier, {
+            "n_neighbors": (st.slider, {"label":"Neighbors", "min_value":1, "max_value":50, "value":5}),
+        }),
+        "GaussianNB": (GaussianNB, {}),
+        "DecisionTreeClassifier": (DecisionTreeClassifier, {
+            "max_depth": (st.slider, {"label":"Max depth", "min_value":1, "max_value":60, "value":10}),
+        }),
+        "GradientBoostingClassifier": (GradientBoostingClassifier, {
+            "n_estimators": (st.slider, {"label":"Estimators", "min_value":50, "max_value":600, "value":200}),
+            "learning_rate": (st.slider, {"label":"Learning rate", "min_value":0.01, "max_value":0.5, "value":0.1}),
+            "max_depth": (st.slider, {"label":"Max depth", "min_value":1, "max_value":8, "value":3}),
+        }),
+        "MLPClassifier": (MLPClassifier, {
+            "hidden_layer_sizes": (st.slider, {"label":"Hidden units", "min_value":8, "max_value":512, "value":128}),
+            "learning_rate_init": (st.slider, {"label":"LR", "min_value":1e-4, "max_value":1e-1, "value":1e-3}),
+            "max_iter": (st.slider, {"label":"Epochs", "min_value":50, "max_value":2000, "value":300}),
+            "early_stopping": (st.checkbox, {"label":"Early stopping", "value":True}),
+        }),
+    }
+    if XGB_OK:
+        models_cls["XGBClassifier"] = (XGBClassifier, {
+            "n_estimators": (st.slider, {"label":"Estimators", "min_value":50, "max_value":1000, "value":300}),
+            "learning_rate": (st.slider, {"label":"Learning rate", "min_value":0.01, "max_value":0.5, "value":0.1}),
+            "subsample": (st.slider, {"label":"Subsample", "min_value":0.5, "max_value":1.0, "value":0.9}),
+            "colsample_bytree": (st.slider, {"label":"Colsample by tree", "min_value":0.5, "max_value":1.0, "value":0.9}),
+            "eval_metric": (st.selectbox, {"label":"Eval metric", "options":["logloss","auc"], "index":0}),
+        })
 
+    models_reg = {
+        "LinearRegression": (LinearRegression, {}),
+        "Ridge": (Ridge, {"alpha": (st.slider, {"label":"alpha", "min_value":0.0, "max_value":10.0, "value":1.0})}),
+        "Lasso": (Lasso, {"alpha": (st.slider, {"label":"alpha", "min_value":0.0, "max_value":10.0, "value":1.0})}),
+        "ElasticNet": (ElasticNet, {"alpha": (st.slider, {"label":"alpha", "min_value":0.0, "max_value":10.0, "value":1.0}),
+                                     "l1_ratio": (st.slider, {"label":"l1_ratio", "min_value":0.0, "max_value":1.0, "value":0.5})}),
+        "RandomForestRegressor": (RandomForestRegressor, {
+            "n_estimators": (st.slider, {"label":"Trees", "min_value":50, "max_value":800, "value":200}),
+            "max_depth": (st.slider, {"label":"Max depth", "min_value":1, "max_value":60, "value":None}),
+            "random_state": (st.number_input, {"label":"Random State", "value":42}),
+        }),
+        "SVR": (SVR, {"C": (st.slider, {"label":"C", "min_value":0.01, "max_value":10.0, "value":1.0}),
+                       "kernel": (st.selectbox, {"label":"Kernel", "options":["rbf","linear","poly"], "index":0})}),
+        "DecisionTreeRegressor": (DecisionTreeRegressor, {
+            "max_depth": (st.slider, {"label":"Max depth", "min_value":1, "max_value":60, "value":10}),
+        }),
+        "GradientBoostingRegressor": (GradientBoostingRegressor, {
+            "n_estimators": (st.slider, {"label":"Estimators", "min_value":50, "max_value":600, "value":200}),
+            "learning_rate": (st.slider, {"label":"Learning rate", "min_value":0.01, "max_value":0.5, "value":0.1}),
+            "max_depth": (st.slider, {"label":"Max depth", "min_value":1, "max_value":8, "value":3}),
+        }),
+        "MLPRegressor": (MLPRegressor, {
+            "hidden_layer_sizes": (st.slider, {"label":"Hidden units", "min_value":8, "max_value":512, "value":128}),
+            "learning_rate_init": (st.slider, {"label":"LR", "min_value":1e-4, "max_value":1e-1, "value":1e-3}),
+            "max_iter": (st.slider, {"label":"Epochs", "min_value":50, "max_value":2000, "value":300}),
+            "early_stopping": (st.checkbox, {"label":"Early stopping", "value":True}),
+        }),
+    }
+    if XGB_OK:
+        models_reg["XGBRegressor"] = (XGBRegressor, {
+            "n_estimators": (st.slider, {"label":"Estimators", "min_value":50, "max_value":1000, "value":300}),
+            "learning_rate": (st.slider, {"label":"Learning rate", "min_value":0.01, "max_value":0.5, "value":0.1}),
+            "subsample": (st.slider, {"label":"Subsample", "min_value":0.5, "max_value":1.0, "value":0.9}),
+            "colsample_bytree": (st.slider, {"label":"Colsample by tree", "min_value":0.5, "max_value":1.0, "value":0.9}),
+        })
+
+    zoo = models_cls if task=="Classification" else models_reg
+    mname = st.selectbox("Model", list(zoo.keys()))
+
+    # build kwargs via widgets with inline help
+    params = {}
     with st.expander("Hyperparameters", expanded=True):
-        params = {}
-        if model_name == "LogisticRegression":
-            params["C"] = st.number_input("C", 0.01, 10.0, 1.0)
-            params["max_iter"] = st.number_input("Max iter", 50, 5000, 300)
-            params["solver"] = "liblinear"
-        elif model_name.startswith("RandomForest"):
-            params["n_estimators"] = st.slider("n_estimators", 50, 800, 200)
-            params["max_depth"] = st.slider("max_depth", 1, 60, 12)
-            params["random_state"] = 42
-        elif model_name in ("SVC", "SVR"):
-            params["C"] = st.slider("C", 0.01, 10.0, 1.0)
-            params["kernel"] = st.selectbox("kernel", ["rbf", "linear", "poly"]) 
-        elif model_name.startswith("KNeighbors"):
-            params["n_neighbors"] = st.slider("n_neighbors", 1, 35, 5)
-        elif model_name == "GaussianNB":
-            pass
-        elif model_name == "DecisionTreeRegressor":
-            params["max_depth"] = st.slider("max_depth", 1, 60, 10)
-            params["random_state"] = 42
-        elif model_name in ("MLPClassifier", "MLPRegressor"):
-            params["hidden_layer_sizes"] = (st.slider("Hidden units", 16, 512, 128),)
-            params["learning_rate_init"] = st.slider("Learning rate", 1e-4, 1e-1, 1e-3)
-            params["max_iter"] = st.slider("Epochs (max_iter)", 50, 2000, 300)
-            params["early_stopping"] = st.checkbox("Early stopping", value=True)
-        elif model_name in ("GradientBoostingClassifier", "GradientBoostingRegressor"):
-            params["n_estimators"] = st.slider("n_estimators", 50, 600, 200)
-            params["learning_rate"] = st.slider("learning_rate", 0.01, 0.5, 0.1)
-            params["max_depth"] = st.slider("max_depth", 1, 8, 3)
-        elif model_name in ("XGBClassifier", "XGBRegressor") and XGB_AVAILABLE:
-            params["n_estimators"] = st.slider("n_estimators", 50, 1000, 300)
-            params["learning_rate"] = st.slider("learning_rate", 0.01, 0.5, 0.1)
-            params["subsample"] = st.slider("subsample", 0.5, 1.0, 0.9)
-            params["colsample_bytree"] = st.slider("colsample_bytree", 0.5, 1.0, 0.9)
-            if model_name == "XGBClassifier":
-                params["eval_metric"] = "logloss"
+        for pname, (wfun, kwargs) in zoo[mname][1].items():
+            label = kwargs.pop("label", pname)
+            widget_val = wfun(label, **kwargs)
+            # adapt for MLP hidden_layer_sizes (int -> tuple)
+            if pname == "hidden_layer_sizes":
+                widget_val = (int(widget_val),)
+            params[pname] = widget_val
+            st.caption(f"ℹ️ {pname}: {label}")
 
-    with st.expander("Execution", expanded=True):
-        exec_target = st.radio("Run on", ["Local", "Kaggle (sim)"])
-        email_me = st.checkbox("Email me results when done", value=True if S["authed"] else False)
+    # Train
+    if st.button("🚀 Train", type="primary"):
+        X = df.drop(columns=[S["target"]])
+        y = df[S["target"]]
+        # encode categoricals
+        for c in X.select_dtypes(include=["object","category"]).columns:
+            le = LabelEncoder()
+            X[c] = le.fit_transform(X[c].astype(str))
+        if task=="Classification" and y.dtype=="object":
+            y = LabelEncoder().fit_transform(y.astype(str))
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42,
+                                                            stratify=y if task=="Classification" else None)
+        Model = zoo[mname][0]
+        model = Model(**params)
+        t0 = time.time(); model.fit(X_train, y_train); t = time.time()-t0
+        y_pred = model.predict(X_test)
 
-    # Train button
-    if st.button("🚀 Train", type="primary", use_container_width=True):
-        with st.status("Training...", expanded=True) as status:
-            X = DF[features].copy()
-            y = DF[target].copy()
+        if task=="Classification":
+            acc = accuracy_score(y_test, y_pred)
+            f1 = f1_score(y_test, y_pred, average='weighted')
+            st.markdown(f"<div class='metric'><b>Accuracy</b> {acc*100:.2f}%</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric'><b>F1 (weighted)</b> {f1:.4f}</div>", unsafe_allow_html=True)
+            cm = confusion_matrix(y_test, y_pred)
+            fig, ax = plt.subplots(); sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax); st.pyplot(fig)
+            S["results"] = {"task":task, "model":mname, "accuracy":acc, "f1":f1, "train_time":round(t,3)}
+        else:
+            rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+            r2 = float(r2_score(y_test, y_pred))
+            st.markdown(f"<div class='metric'><b>RMSE</b> {rmse:.4f}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div class='metric'><b>R²</b> {r2:.4f}</div>", unsafe_allow_html=True)
+            S["results"] = {"task":task, "model":mname, "rmse":rmse, "r2":r2, "train_time":round(t,3)}
+        S["model"] = model
+        S["final_cols"] = list(X.columns)
+        st.success("Training complete. See Results or try Playground.")
 
-            # Encode categoricals
-            cat_cols = X.select_dtypes(include=["object", "category"]).columns.tolist()
-            encoders = {}
-            ohe_cols = None
-            if cat_cols:
-                status.write(f"Encoding {len(cat_cols)} categorical features with {S['encoding']}...")
-                if S["encoding"] == "One-Hot":
-                    X = pd.get_dummies(X, drop_first=False)
-                    ohe_cols = X.columns.tolist()
-                else:
-                    for c in cat_cols:
-                        le = LabelEncoder()
-                        X[c] = le.fit_transform(X[c].astype(str))
-                        encoders[c] = le
+# ===================== PLAYGROUND (supervised) =====================
+elif S["page"] == "playground":
+    st.title("Model Playground (Supervised)")
+    if S["df"] is None or S["target"] is None or S["model"] is None:
+        st.info("Train a supervised model first.")
+        st.stop()
+    df = S["df"]; target = S["target"]
+    X = df.drop(columns=[target]); y = df[target]
+    for c in X.select_dtypes(include=["object","category"]).columns:
+        X[c] = LabelEncoder().fit_transform(X[c].astype(str))
+    if y.dtype=="object": y = LabelEncoder().fit_transform(y.astype(str))
 
-            # Target encoding for classification strings
-            target_encoder = None
-            if S["task"] == "Classification" and y.dtype == "object":
-                target_encoder = LabelEncoder()
-                y = target_encoder.fit_transform(y.astype(str))
+    # reduce to 2D for visualization
+    pca = PCA(n_components=2)
+    X2 = pca.fit_transform(X)
+    st.caption("Visualizing data in 2D using PCA.")
+    fig = px.scatter(x=X2[:,0], y=X2[:,1], color=y.astype(str), labels={'x':'PC1','y':'PC2'}, title="Data (PCA)")
+    st.plotly_chart(fig, use_container_width=True)
 
-            # Scale
-            scaler = None
-            if do_scale:
-                status.write("Scaling features...")
-                scaler = StandardScaler()
-                X = pd.DataFrame(scaler.fit_transform(X), columns=X.columns)
+    # decision boundary (classification) or actual vs pred (regression)
+    model = S["model"]
+    task = S["results"].get("task","Classification")
 
-            final_cols = X.columns.tolist()
+    if task == "Classification":
+        # train model on PCA space for boundary
+        X_train, X_test, y_train, y_test = train_test_split(X2, y, test_size=0.2, random_state=42, stratify=y)
+        clone = type(model)(**getattr(model, 'get_params', lambda: {})())
+        try:
+            clone.fit(X_train, y_train)
+            # grid
+            x_min, x_max = X2[:,0].min()-1, X2[:,0].max()+1
+            y_min, y_max = X2[:,1].min()-1, X2[:,1].max()+1
+            xx, yy = np.meshgrid(np.linspace(x_min, x_max, 200), np.linspace(y_min, y_max, 200))
+            Z = clone.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
+            fig2 = go.Figure()
+            fig2.add_trace(go.Contour(x=np.linspace(x_min,x_max,200), y=np.linspace(y_min,y_max,200), z=Z,
+                                      showscale=False, contours_coloring='heatmap', opacity=0.3))
+            fig2.add_trace(go.Scatter(x=X2[:,0], y=X2[:,1], mode='markers',
+                                      marker=dict(size=6), text=[str(v) for v in y]))
+            fig2.update_layout(title="Decision Boundary (PCA space)", xaxis_title="PC1", yaxis_title="PC2")
+            st.plotly_chart(fig2, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Boundary viz not available for this model: {e}")
+    else:
+        # regression: actual vs predicted
+        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+        y_pred = S["model"].predict(X_test)
+        fig3 = px.scatter(x=y_test, y=y_pred, labels={'x':'Actual','y':'Predicted'}, title='Actual vs Predicted')
+        fig3.add_shape(type='line', x0=float(np.min(y_test)), y0=float(np.min(y_test)),
+                       x1=float(np.max(y_test)), y1=float(np.max(y_test)))
+        st.plotly_chart(fig3, use_container_width=True)
 
-            # Split
-            X_train, X_test, y_train, y_test = train_test_split(
-                X, y, test_size=1-split, random_state=42, stratify=y if S["task"]=="Classification" else None
-            )
+# ===================== UNSUPERVISED =====================
+elif S["page"] == "unsupervised":
+    st.title("Unsupervised Lab")
+    if S["df"] is None:
+        st.info("Upload a dataset first.")
+        st.stop()
+    df = S["df"].copy()
+    # encode objects for algorithms
+    for c in df.select_dtypes(include=["object","category"]).columns:
+        df[c] = LabelEncoder().fit_transform(df[c].astype(str))
 
-            # Model map
-            model_map = {
-                "LogisticRegression": LogisticRegression,
-                "RandomForestClassifier": RandomForestClassifier,
-                "SVC": SVC,
-                "KNeighborsClassifier": KNeighborsClassifier,
-                "GaussianNB": GaussianNB,
-                "MLPClassifier": MLPClassifier,
-                "GradientBoostingClassifier": GradientBoostingClassifier,
-                "LinearRegression": LinearRegression,
-                "RandomForestRegressor": RandomForestRegressor,
-                "SVR": SVR,
-                "KNeighborsRegressor": KNeighborsRegressor,
-                "DecisionTreeRegressor": DecisionTreeRegressor,
-                "MLPRegressor": MLPRegressor,
-                "GradientBoostingRegressor": GradientBoostingRegressor,
-                "SGDRegressor": SGDRegressor,
-            }
-            if XGB_AVAILABLE:
-                model_map.update({"XGBClassifier": XGBClassifier, "XGBRegressor": XGBRegressor})
+    algo = st.selectbox("Algorithm", ["KMeans","DBSCAN","Agglomerative","GaussianMixture","IsolationForest","PCA (2D)"])
+    params = {}
+    if algo=="KMeans":
+        k = st.slider("k (clusters)", 2, 15, 4)
+        params["n_clusters"] = k
+        model = KMeans(**params, n_init=10)
+        labels = model.fit_predict(df)
+        sil = silhouette_score(df, labels) if len(set(labels))>1 else np.nan
+        st.caption(f"Silhouette: {sil:.4f}")
+    elif algo=="DBSCAN":
+        eps = st.slider("eps", 0.1, 10.0, 0.8)
+        min_s = st.slider("min_samples", 3, 50, 5)
+        model = DBSCAN(eps=eps, min_samples=min_s)
+        labels = model.fit_predict(df)
+    elif algo=="Agglomerative":
+        k = st.slider("clusters", 2, 15, 5)
+        model = AgglomerativeClustering(n_clusters=k)
+        labels = model.fit_predict(df)
+    elif algo=="GaussianMixture":
+        k = st.slider("components", 2, 15, 4)
+        model = GaussianMixture(n_components=k, random_state=42)
+        labels = model.fit_predict(df)
+    elif algo=="IsolationForest":
+        c = st.slider("contamination", 0.01, 0.4, 0.05)
+        model = IsolationForest(contamination=c, random_state=42)
+        labels = model.fit_predict(df)
+    else:  # PCA (2D)
+        pca = PCA(n_components=2); X2 = pca.fit_transform(df)
+        st.plotly_chart(px.scatter(x=X2[:,0], y=X2[:,1], title="PCA 2D"), use_container_width=True)
+        st.stop()
 
-            Model = model_map[model_name]
-            model = Model(**params)
+    # visualize clusters in 2D
+    pca = PCA(n_components=2); X2 = pca.fit_transform(df)
+    fig = px.scatter(x=X2[:,0], y=X2[:,1], color=[str(v) for v in labels], title=f"{algo} — PCA Projection")
+    st.plotly_chart(fig, use_container_width=True)
+    S["unsup_labels"] = labels
 
-            t0 = time.time()
-            model.fit(X_train, y_train)
-            train_time = time.time() - t0
-
-            y_pred = model.predict(X_test)
-
-            results = {"Execution": exec_target.split()[0], "Training Time (s)": round(train_time, 3), "Model": model_name}
-
-            st.markdown("---")
-            st.markdown("#### Results")
-            if S["task"] == "Classification":
-                acc = accuracy_score(y_test, y_pred)
-                report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
-                f1 = report.get("weighted avg", {}).get("f1-score", 0.0)
-                c1, c2, c3 = st.columns(3)
-                c1.markdown(f"<div class='metric'><b>Accuracy</b><br><h3>{acc*100:.2f}%</h3></div>", unsafe_allow_html=True)
-                c2.markdown(f"<div class='metric'><b>F1 (weighted)</b><br><h3>{f1:.4f}</h3></div>", unsafe_allow_html=True)
-                c3.markdown(f"<div class='metric'><b>Time</b><br><h3>{train_time:.2f}s</h3></div>", unsafe_allow_html=True)
-
-                cm = confusion_matrix(y_test, y_pred)
-                fig, ax = plt.subplots()
-                ax.imshow(cm)
-                ax.set_title("Confusion Matrix")
-                ax.set_xlabel("Predicted")
-                ax.set_ylabel("True")
-                for (i, j), v in np.ndenumerate(cm):
-                    ax.text(j, i, str(v), ha='center', va='center', color='white')
-                st.pyplot(fig, clear_figure=True, use_container_width=True)
-
-                results.update({"Accuracy": round(acc, 4), "F1-Score": round(f1, 4)})
-            else:
-                rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
-                r2 = float(r2_score(y_test, y_pred))
-                c1, c2, c3 = st.columns(3)
-                c1.markdown(f"<div class='metric'><b>RMSE</b><br><h3>{rmse:.4f}</h3></div>", unsafe_allow_html=True)
-                c2.markdown(f"<div class='metric'><b>R²</b><br><h3>{r2:.4f}</h3></div>", unsafe_allow_html=True)
-                c3.markdown(f"<div class='metric'><b>Time</b><br><h3>{train_time:.2f}s</h3></div>", unsafe_allow_html=True)
-                results.update({"RMSE": round(rmse, 4), "R2": round(r2, 4)})
-
-            # Persist
-            S.update({
-                "model": model,
-                "scaler": scaler,
-                "encoders": encoders,
-                "ohe_cols": ohe_cols,
-                "final_cols": final_cols,
-                "features": features,
-                "target_encoder": target_encoder,
-                "target_classes": list(target_encoder.classes_) if target_encoder is not None else None,
-                "results": results,
-            })
-
-            # Email
-            if email_me and S["authed"] and S["email"] and S["app_password"]:
-                status.write("Sending email...")
-                ok, message = (lambda res, m, t: (
-                    (lambda sender, pwd, rcpt: (
-                        (lambda: (False, "Credentials missing")) if not (sender and pwd) else (lambda: (
-                            (lambda: (
-                                (lambda server: (
-                                    server.login(sender, pwd), server.sendmail(sender, sender, m.as_string()), server.quit(), True
-                                ))(smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ssl.create_default_context()))
-                            ))()
-                        ))()
-                    ))(S["email"], S["app_password"], S["email"]))
-                )({**results},
-                  (lambda res: (lambda msg: (
-                      msg.attach(MIMEText(f"""
-<html><body style='font-family:Inter,system-ui;color:#0b1220'>
-<h2 style='color:#8b5cf6;margin:0'>ML Training Complete</h2>
-<p><b>Model</b>: {res.get('Model','')}</p>
-<p><b>Execution</b>: {res.get('Execution','')} • <b>Time</b>: {res.get('Training Time (s)','')} s</p>
-<pre style='background:#0b1220;color:#e5e7eb;border:1px solid #263043;padding:14px;border-radius:10px;'>{json.dumps(res, indent=2)}</pre>
-</body></html>""", "html")), msg)[1]
-                  )(MIMEMultipart("alternative"))), S["task"])  # type: ignore
-                status.write("✅ Email sent" if ok else f"⚠️ {message}")
-
-            status.update(label="✅ Complete", state="complete", expanded=False)
-
-# ==================== RESULTS ====================
+# ===================== RESULTS & EMAIL =====================
 elif S["page"] == "results":
-    st.markdown("### 📊 Results")
-    if not S.get("results"):
+    st.title("Results & Reports")
+    if not S["results"]:
         st.info("Train a model to see results.")
     else:
         st.json(S["results"])
+        if S["user_email"]:
+            if st.button("📧 Send results to user", type="primary"):
+                ok = send_results_email(S["user_email"], "Your AutoMLPilot Results", S["results"])
+                st.success("Sent") if ok else st.error("Failed")
+        else:
+            st.warning("Enter recipient email on Dashboard.")
 
-# ==================== SETTINGS ====================
-elif S["page"] == "settings":
-    st.markdown("### ⚙️ Settings")
-    with st.form("smtp_form"):
-        st.text_input("Gmail address", value=S["email"], key="email_edit")
-        st.text_input("Gmail App password", type="password", value=S["app_password"], key="pwd_edit")
-        st.caption("These are used only to send emails to yourself via Gmail SMTP over SSL.")
-        if st.form_submit_button("Save"):
-            S["email"] = st.session_state.get("email_edit", "")
-            S["app_password"] = st.session_state.get("pwd_edit", "")
-            st.success("Saved.")
+# ===================== HELP =====================
+elif S["page"] == "help":
+    st.title("Help & Tips")
+    st.markdown("""
+    **How to choose a model?**
+    - **Logistic Regression**: fast baseline for classification; good with linear relationships.
+    - **Random Forest / Gradient Boosting**: strong non‑linear learners; handle mixed features.
+    - **SVM**: robust for medium‑sized datasets; try RBF kernel.
+    - **KNN**: simple; useful when decision boundary is local.
+    - **Neural MLP**: try when you want non‑linear fits without feature crafting.
+    - **For regression**: start with Linear → Random Forest / GB → SVR / MLP.
 
-    if S.get("df") is not None:
-        st.download_button(
-            "⬇ Download current CSV",
-            S["df"].to_csv(index=False).encode("utf-8"),
-            file_name="processed.csv",
-            mime="text/csv",
-        )
+    **Preprocessing recipes**
+    - Use **One‑Hot** for categorical features with tree models (RF/GB) or linear models.
+    - Use **StandardScaler** for SVM/MLP/SVR.
+    - Remove extreme outliers with **IQR** when numeric ranges are skewed.
+
+    **Playground** renders PCA to 2D and shows decision boundaries (classification) or Actual vs Predicted (regression).
+    """)
