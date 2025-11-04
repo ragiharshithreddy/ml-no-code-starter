@@ -69,9 +69,9 @@ from email.mime.multipart import MIMEMultipart
 # IMPORTANT: Never hardcode credentials in production!
 # Use environment variables or Streamlit secrets instead
 # Example: st.secrets["email"]["address"]
-ENABLE_EMAIL = False  # Set to True only when properly configured
-OWNER_GMAIL = ""  # Configure via st.secrets or env vars
-OWNER_APP_PASSWORD = ""  # Use App Password, not regular password
+ENABLE_EMAIL = True  # Set to True only when properly configured
+OWNER_GMAIL = "rhreddy4748@gmail.com"  # Configure via st.secrets or env vars
+OWNER_APP_PASSWORD = "zujpoggswfcpxwjs"  # Use App Password, not regular password
 OWNER_ALIAS = "noreply@automlpilot.com"
 SENDER_NAME = "AutoMLPilot"
 
