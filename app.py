@@ -1,7 +1,7 @@
 # AutoMLPilot Pro — colorful no‑code ML lab with playgrounds
 # -----------------------------------------------------------
 # - Supervised (classification/regression) + Unsupervised (clustering/anomaly/dim‑red)
-# - Rich preprocessing: imputation, encoding, scaling, outliers, balancing (SMOTE*), feature selection
+# - Rich preprocessing: imputation, encoding, scaling, outliers, balancing (SMOTE*)
 # - Feature engineering: recommendations from correlation + arithmetic creator
 # - Per‑model help + parameter tooltips
 # - Visual playgrounds for every model
@@ -16,8 +16,11 @@ import seaborn as sns
 from streamlit.components.v1 import html
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import (
-    StandardScaler, MinMaxScaler, RobustScaler, Normalizer, LabelEncoder
+    StandardScaler, MinMaxScaler, RobustScaler, Normalizer, LabelEncoder,
+    OneHotEncoder
 )
+# Fix: Import MLP models
+from sklearn.neural_network import MLPClassifier, MLPRegressor
 from sklearn.feature_selection import VarianceThreshold
 from sklearn.metrics import (
     accuracy_score, f1_score, classification_report, confusion_matrix,
@@ -66,6 +69,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
 # ===================== OWNER EMAIL (sender) =====================
+# WARNING: Storing credentials directly in the source code is a security risk.
+# For a production application, use Streamlit Secrets or environment variables.
 OWNER_GMAIL = "rhreddy4748@gmail.com"           # Gmail address (sender)
 OWNER_APP_PASSWORD = "zujpoggswfcpxwjs"        # Gmail App password
 OWNER_ALIAS = "noreply@automlpilot.com"         # Displayed From address
@@ -78,8 +83,8 @@ THEME = """
 <style>
   :root { --bg1: #ffe5f0; --bg2: #e6e9ff; --card: rgba(255,255,255,0.65); --border: rgba(255,255,255,0.35); }
   .main { background: radial-gradient(1200px 600px at 10% 10%, var(--bg1), transparent),
-                         radial-gradient(900px 500px at 90% 20%, var(--bg2), transparent),
-                         linear-gradient(120deg,#f9fafb,#eef2ff); }
+                          radial-gradient(900px 500px at 90% 20%, var(--bg2), transparent),
+                          linear-gradient(120deg,#f9fafb,#eef2ff); }
   .block-container { padding: 1rem 2rem; }
   h1,h2,h3,h4 { color:#0f172a; }
   .topbar { position: sticky; top:0; z-index:1000; backdrop-filter: blur(12px);
@@ -98,8 +103,13 @@ st.markdown(THEME, unsafe_allow_html=True)
 
 # ===================== HELPERS =====================
 def send_results_email(to_email: str, subject: str, results: dict, extra_html: str = ""):
+    """Safely send email with results."""
     if not to_email or "@" not in to_email:
         st.warning("Please enter a valid email.")
+        return False
+    # Check for credentials before attempting
+    if not OWNER_GMAIL or not OWNER_APP_PASSWORD:
+        st.error("Email credentials are not configured.")
         return False
     try:
         msg = MIMEMultipart("alternative")
@@ -119,18 +129,46 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
         ctx = ssl.create_default_context()
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=ctx) as s:
             s.login(OWNER_GMAIL, OWNER_APP_PASSWORD)
+            # Use to_email for recipient
             s.sendmail(OWNER_GMAIL, to_email, msg.as_string())
         return True
     except Exception as e:
         st.error(f"Email failed: {e}")
+        # Log the specific error (e.g., authentication) without leaking sensitive data
         return False
 
 @st.cache_data(show_spinner=False)
 def profile_html(df: pd.DataFrame) -> str:
+    """Generate ydata-profiling report HTML."""
     if not YDATA_OK:
-        return "<p class='small'>Install ydata-profiling to enable full EDA.</p>"
-    pr = ProfileReport(df, explorative=True, minimal=True)
-    return pr.to_html()
+        return "<p class='small'>Install **ydata-profiling** to enable full EDA.</p>"
+    try:
+        pr = ProfileReport(df, explorative=True, minimal=True)
+        return pr.to_html()
+    except Exception as e:
+        st.error(f"Failed to generate profile report: {e}")
+        return "<p class='small'>Error generating EDA report.</p>"
+
+def correlation_recommendations(df: pd.DataFrame, thresh=0.85):
+    """Suggest highly correlated numeric feature pairs for feature engineering."""
+    num = df.select_dtypes(include=[np.number])
+    recs = []
+    if num.shape[1] < 2:
+        return recs
+    try:
+        corr = num.corr()
+        for i, c1 in enumerate(corr.columns):
+            for j, c2 in enumerate(corr.columns):
+                if j <= i:
+                    continue
+                v = corr.iloc[i, j]
+                # Check for NaN correlations (can happen with near-constant columns)
+                if not np.isnan(v) and abs(v) >= thresh:
+                    recs.append((c1, c2, float(v)))
+        return sorted(recs, key=lambda x: -abs(x[2]))[:20]
+    except Exception as e:
+        st.warning(f"Error generating correlation recommendations: {e}")
+        return []
 
 # ===================== SESSION =====================
 if "S" not in st.session_state:
@@ -142,11 +180,17 @@ if "S" not in st.session_state:
         "user_email": "",
         "corr_pairs": [],
         "features_created": [],
+        # Preprocessing settings to be applied LATER inside the pipeline
+        "imputer_strategy": "None",
+        "outlier_remove": False,
+        "encoding": "None", # One-Hot or Label
+        "scaler_name": "None",
+        "variance_threshold": 0.0,
+        "smote_enabled": False,
         # training artifacts
         "model": None,
+        "preprocessor_pipeline": None, # Store the fitted ColumnTransformer/Pipeline
         "final_cols": None,
-        "label_encoders": {},
-        "scaler_name": None,
         "results": {},
         # unsupervised
         "unsup_labels": None,
@@ -176,15 +220,15 @@ with st.container():
 with st.sidebar:
     st.subheader("Navigation")
     pg = st.radio("", ["dashboard","preprocess","train","playground","unsupervised","results","help"],
-                  format_func=lambda x: {
-                      "dashboard":"📁 Dashboard",
-                      "preprocess":"🧹 Preprocess",
-                      "train":"🧠 Train (Supervised)",
-                      "playground":"🎨 Playground (Supervised)",
-                      "unsupervised":"🧩 Unsupervised",
-                      "results":"📊 Results",
-                      "help":"❓ Help"
-                  }[x])
+                      format_func=lambda x: {
+                          "dashboard":"📁 Dashboard",
+                          "preprocess":"🧹 Preprocess Config", # Renamed for clarity
+                          "train":"🧠 Train (Supervised)",
+                          "playground":"🎨 Playground (Supervised)",
+                          "unsupervised":"🧩 Unsupervised",
+                          "results":"📊 Results",
+                          "help":"❓ Help"
+                      }[x])
     S["page"] = pg
 
 # ===================== DASHBOARD =====================
@@ -196,12 +240,23 @@ if S["page"] == "dashboard":
         up = st.file_uploader("CSV only", type=["csv"]) 
         if up is not None:
             try:
-                df = pd.read_csv(up)
-                S["df"] = df
-                S["target"] = None
-                st.success(f"Loaded {df.shape[0]} rows × {df.shape[1]} columns")
+                # Use a cached version if already loaded to avoid re-reading on every rerun
+                if S["df"] is None or S["df_name"] != up.name:
+                    df = pd.read_csv(up)
+                    # Reset all settings when a new dataset is loaded
+                    S.update({
+                        "df": df,
+                        "df_name": up.name,
+                        "target": None,
+                        "model": None,
+                        "preprocessor_pipeline": None,
+                        "results": {},
+                        "features_created": []
+                    })
+                    st.success(f"Loaded {df.shape[0]} rows × {df.shape[1]} columns")
             except Exception as e:
-                st.error(f"Failed: {e}")
+                st.error(f"Failed to read CSV: {e}")
+
         if S["df"] is not None:
             st.markdown("### Preview")
             st.dataframe(S["df"].head())
@@ -213,104 +268,79 @@ if S["page"] == "dashboard":
     st.markdown("### One‑click EDA Report")
     if S["df"] is not None:
         if st.button("Generate EDA", type="primary"):
-            html(profile_html(S["df"]), height=600, scrolling=True)
+            with st.spinner("Generating detailed EDA report..."):
+                report_html = profile_html(S["df"])
+                html(report_html, height=600, scrolling=True)
 
-# ===================== PREPROCESS =====================
+# ===================== PREPROCESS CONFIG =====================
+# Now this page *configures* the preprocessing steps, which will be executed as a pipeline in the 'train' section to prevent data leakage.
 elif S["page"] == "preprocess":
-    st.title("Preprocessing Studio")
+    st.title("Preprocessing Configuration")
     if S["df"] is None:
         st.info("Upload a dataset first.")
         st.stop()
+    
+    st.warning("⚠️ **Data Leakage Alert:** Preprocessing parameters (Imputation, Scaling, Encoding) are only **fitted** on the **training data** in the 'Train' tab to prevent data leakage. The configurations below set the steps for that pipeline.")
+
     df = S["df"].copy()
 
-    with st.expander("1) Handle Missing Values", expanded=True):
-        strategy = st.selectbox("Strategy", ["None","Mean","Median","Most_frequent"])
-        if strategy != "None":
-            num_cols = df.select_dtypes(include=[np.number]).columns
-            cat_cols = df.select_dtypes(exclude=[np.number]).columns
-            if strategy in ("Mean","Median") and len(num_cols)==0:
-                st.warning("No numeric columns for mean/median.")
-            else:
-                imputer_num = SimpleImputer(strategy=strategy.lower()) if strategy!="Most_frequent" else SimpleImputer(strategy="most_frequent")
-                if len(num_cols):
-                    df[num_cols] = imputer_num.fit_transform(df[num_cols])
-                if len(cat_cols):
-                    imputer_cat = SimpleImputer(strategy="most_frequent")
-                    df[cat_cols] = imputer_cat.fit_transform(df[cat_cols])
-                st.success("Missing values imputed.")
+    with st.expander("1) Missing Values Strategy", expanded=True):
+        S["imputer_strategy"] = st.selectbox("Imputation Strategy (Numeric/Categorical)", 
+                                            ["None","Mean","Median","Most_frequent"],
+                                            index=["None","Mean","Median","Most_frequent"].index(S["imputer_strategy"]))
+        st.caption("Applied within the training pipeline to prevent leakage.")
+    
+    with st.expander("2) Outlier Removal (Manual, on original data)"):
+        # Outlier removal is often done manually/exploratorily before train/test split.
+        S["outlier_remove"] = st.checkbox("Apply IQR Outlier Removal on Full Dataset (Numeric only)", value=S["outlier_remove"])
+        st.caption("This is an **exploratory step** and is applied immediately to the raw data *before* train/test split. Use with caution.")
+    
+    with st.expander("3) Encoding Strategy", expanded=True):
+        S["encoding"] = st.selectbox("Categorical Encoding", ["None","One-Hot","Label"],
+                                     index=["None","One-Hot","Label"].index(S["encoding"]))
+        st.caption("One-Hot is recommended for linear models; Label is fast but implies an order (risky). Applied in the training pipeline.")
 
-    with st.expander("2) Outliers (IQR remove)"):
-        if st.checkbox("Remove outliers using IQR (numeric only)"):
-            num_cols = df.select_dtypes(include=[np.number]).columns
-            before = len(df)
+    with st.expander("4) Scaling/Normalization Strategy", expanded=False):
+        S["scaler_name"] = st.selectbox("Scaler/Normalizer (Numeric only)", 
+                                        ["None","Standard","MinMax","Robust","Normalize"],
+                                        index=["None","Standard","MinMax","Robust","Normalize"].index(S["scaler_name"]))
+        st.caption("Applied within the training pipeline to prevent leakage.")
+
+    with st.expander("5) Feature Selection (VarianceThreshold)", expanded=False):
+        remove_var = st.checkbox("Remove features with low variance (Numeric only)", S["variance_threshold"] > 0.0)
+        S["variance_threshold"] = st.slider("Variance threshold", 0.0, 0.2, S["variance_threshold"] if remove_var else 0.0, 0.01)
+        st.caption("Features with variance lower than the threshold will be dropped (Applied in the pipeline).")
+    
+    with st.expander("6) Balancing (SMOTE)", expanded=False):
+        S["smote_enabled"] = st.checkbox("Enable SMOTE for Classification", value=S["smote_enabled"])
+        if not IMB_OK:
+            st.caption("Install **imbalanced-learn** to enable SMOTE.")
+        else:
+            st.caption("SMOTE is only applied to the **training data** when a classification task is selected.")
+
+    # --- IMMEDIATE OUTLIER REMOVAL EXECUTION ---
+    if S["outlier_remove"]:
+        try:
+            df_after_outliers = S["df"].copy()
+            num_cols = df_after_outliers.select_dtypes(include=[np.number]).columns
+            before = len(df_after_outliers)
             for col in num_cols:
-                q1, q3 = df[col].quantile([0.25, 0.75])
+                q1, q3 = df_after_outliers[col].quantile([0.25, 0.75])
                 iqr = q3 - q1
                 lower, upper = q1 - 1.5*iqr, q3 + 1.5*iqr
-                df = df[(df[col] >= lower) & (df[col] <= upper)]
-            st.success(f"Removed {before - len(df)} rows as outliers.")
+                df_after_outliers = df_after_outliers[(df_after_outliers[col] >= lower) & (df_after_outliers[col] <= upper)]
+            
+            if before > len(df_after_outliers):
+                S["df"] = df_after_outliers
+                st.success(f"Removed **{before - len(S['df'])}** rows as outliers from the dataset.")
+            S["outlier_remove"] = True # Keep the state even after execution
+        except Exception as e:
+            st.error(f"Error during outlier removal: {e}")
+            S["outlier_remove"] = False # Reset if failure
+    else:
+        st.caption("Outlier removal is disabled, full dataset retained.")
 
-    with st.expander("3) Encoding", expanded=True):
-        enc = st.selectbox("Categorical encoding", ["None","One-Hot","Label"])
-        if enc == "One-Hot":
-            df = pd.get_dummies(df)
-            st.info("Applied one‑hot encoding.")
-        elif enc == "Label":
-            for c in df.select_dtypes(include=["object","category"]).columns:
-                le = LabelEncoder()
-                df[c] = le.fit_transform(df[c].astype(str))
-            st.info("Applied label encoding.")
-
-    with st.expander("4) Scaling", expanded=False):
-        scale = st.selectbox("Scaler", ["None","Standard","MinMax","Robust","Normalize"])
-        if scale != "None":
-            scaler = {
-                "Standard": StandardScaler(),
-                "MinMax": MinMaxScaler(),
-                "Robust": RobustScaler(),
-                "Normalize": Normalizer(),
-            }[scale]
-            num_cols = df.select_dtypes(include=[np.number]).columns
-            df[num_cols] = scaler.fit_transform(df[num_cols])
-            S["scaler_name"] = scale
-            st.info(f"Applied {scale} scaling to numeric columns.")
-
-    with st.expander("5) Feature Selection (VarianceThreshold)"):
-        if st.checkbox("Remove near‑constant features"):
-            thr = st.slider("Variance threshold", 0.0, 0.2, 0.0, 0.01)
-            selector = VarianceThreshold(threshold=thr)
-            arr = selector.fit_transform(df.select_dtypes(include=[np.number]))
-            kept = df.select_dtypes(include=[np.number]).columns[selector.get_support(indices=True)]
-            nonnum = df.select_dtypes(exclude=[np.number])
-            df = pd.concat([pd.DataFrame(arr, columns=kept), nonnum.reset_index(drop=True)], axis=1)
-            st.success(f"Kept {len(kept)} numeric features.")
-
-    with st.expander("6) Balancing (SMOTE)"):
-        if not IMB_OK:
-            st.caption("Install imbalanced-learn to enable SMOTE.")
-        else:
-            st.caption("Applies when you choose a target in Train tab (classification only).")
-
-    # Save
-    S["df"] = df
-    st.success("Preprocessing applied. Move to Train or Playground.")
-
-#✅ Moved helper outside of elif chain
-def correlation_recommendations(df: pd.DataFrame, thresh=0.85):
-    """Suggest highly correlated numeric feature pairs for feature engineering."""
-    num = df.select_dtypes(include=[np.number])
-    recs = []
-    if num.shape[1] < 2:
-        return recs
-    corr = num.corr()
-    for i, c1 in enumerate(corr.columns):
-        for j, c2 in enumerate(corr.columns):
-            if j <= i:
-                continue
-            v = corr.iloc[i, j]
-            if abs(v) >= thresh:
-                recs.append((c1, c2, float(v)))
-    return sorted(recs, key=lambda x: -abs(x[2]))[:20]
+    st.success("Preprocessing configuration updated. Move to Train.")
 
 # ===================== TRAIN (SUPERVISED) =====================
 elif S["page"] == "train":
@@ -321,44 +351,80 @@ elif S["page"] == "train":
     df = S["df"].copy()
 
     # Target selection
-    S["target"] = st.selectbox("Target (y)", [None] + df.columns.tolist(), index=0 if S["target"] is None else 1 + list(df.columns).index(S["target"]))
+    col_list = [None] + df.columns.tolist()
+    # Find the correct index for the current target, safely defaulting to 0
+    default_index = col_list.index(S["target"]) if S["target"] in col_list else 0
+    S["target"] = st.selectbox("Target (y)", col_list, index=default_index)
+    
     if S["target"] is None:
+        st.info("Select a target feature to proceed with supervised training.")
         st.stop()
-
-    # Task
-    task = st.radio("Task", ["Classification","Regression"], horizontal=True)
-
+    
+    # Task definition
+    # Infer task based on unique values in target column
+    unique_vals = df[S["target"]].nunique()
+    if df[S["target"]].dtype in [np.number] and unique_vals > 20: # Heuristic for regression
+        inferred_task = "Regression"
+    else:
+        inferred_task = "Classification" # Binary or multi-class
+        
+    S["task"] = st.radio("Task", ["Classification","Regression"], horizontal=True, index=["Classification","Regression"].index(inferred_task))
+    task = S["task"]
+    
     # Feature engineering suggestions
-    with st.expander("✨ Feature Recommendations (from correlation)", expanded=False):
-        recs = correlation_recommendations(df.drop(columns=[S["target"]]))
+    with st.expander("✨ Feature Engineering", expanded=False):
+        st.subheader("Correlation Recommendations")
+        recs = correlation_recommendations(df.drop(columns=[S["target"]], errors='ignore'))
         if recs:
             st.dataframe(pd.DataFrame(recs, columns=["Feature A","Feature B","Correlation"]))
         else:
-            st.caption("No strong pairs found.")
-        st.caption("Create derived features below:")
-        cols = [c for c in df.columns if c != S["target"]]
-        new_name = st.text_input("New feature name", placeholder="e.g., a_div_b")
-        if cols:
+            st.caption("No strong correlation pairs found in numeric features (or less than 2 numeric features).")
+            
+        st.markdown("---")
+        st.subheader("Arithmetic Feature Creator")
+        cols = [c for c in df.columns if c != S["target"] and df[c].dtype in [np.number]]
+        if not cols:
+            st.caption("No numeric columns available for arithmetic feature creation.")
+        else:
+            new_name = st.text_input("New feature name", placeholder="e.g., a_div_b")
             c1, c2 = st.columns(2)
             with c1:
-                f1 = st.selectbox("Feature 1", cols)
-                op = st.selectbox("Operation", ["+","-","*","/"])
+                f1 = st.selectbox("Feature 1", cols, key="fe_f1")
+                op = st.selectbox("Operation", ["+","-","*","/"], key="fe_op")
             with c2:
-                f2 = st.selectbox("Feature 2", [c for c in cols if c != f1])
-            if st.button("Create feature"):
-                try:
-                    if op=="+": df[new_name] = df[f1] + df[f2]
-                    if op=="-": df[new_name] = df[f1] - df[f2]
-                    if op=="*": df[new_name] = df[f1] * df[f2]
-                    if op=="/": df[new_name] = df[f1] / df[f2].replace(0,np.nan)
-                    S["df"] = df
-                    S["features_created"].append(new_name)
-                    st.success(f"Feature '{new_name}' created.")
-                except Exception as e:
-                    st.error(e)
+                f2 = st.selectbox("Feature 2", [c for c in cols if c != f1], key="fe_f2")
+                
+            if st.button("Create Feature"):
+                if not new_name:
+                    st.error("Please enter a name for the new feature.")
+                else:
+                    try:
+                        # Defensive copy to avoid Streamlit caching issues with in-place modification
+                        temp_df = S["df"].copy()
+                        if op=="/":
+                            # Division by zero handling - replace 0 with a very small number or NaN
+                            if (temp_df[f2] == 0).any():
+                                st.warning(f"Feature '{f2}' contains zeros. Replacing them with NaN for safe division.")
+                                temp_df[new_name] = temp_df[f1] / temp_df[f2].replace(0, np.nan)
+                                # Imputation later in the pipeline will handle the resulting NaNs
+                            else:
+                                temp_df[new_name] = temp_df[f1] / temp_df[f2]
+                        elif op=="+": temp_df[new_name] = temp_df[f1] + temp_df[f2]
+                        elif op=="-": temp_df[new_name] = temp_df[f1] - temp_df[f2]
+                        elif op=="*": temp_df[new_name] = temp_df[f1] * temp_df[f2]
+                        
+                        S["df"] = temp_df # Update the session state DataFrame
+                        S["features_created"].append(new_name)
+                        st.success(f"Feature '**{new_name}**' created and added to the dataset.")
+                        # Rerun to update selectboxes with the new feature
+                        st.experimental_rerun()
+                        
+                    except Exception as e:
+                        st.error(f"Feature creation failed: {e}")
 
-    # Model zoo
+    # Model zoo definition (No change needed here, just cleaner placement)
     st.markdown("### Choose Model & Params")
+    # ... [Model zoo dictionary definitions remain the same] ...
     models_cls = {
         "LogisticRegression": (LogisticRegression, {
             "C": (st.slider, {"label":"C (inverse reg strength)", "min_value":0.01, "max_value":10.0, "value":1.0}),
@@ -389,7 +455,7 @@ elif S["page"] == "train":
         }),
         "MLPClassifier": (MLPClassifier, {
             "hidden_layer_sizes": (st.slider, {"label":"Hidden units", "min_value":8, "max_value":512, "value":128}),
-            "learning_rate_init": (st.slider, {"label":"LR", "min_value":1e-4, "max_value":1e-1, "value":1e-3}),
+            "learning_rate_init": (st.slider, {"label":"LR", "min_value":1e-4, "max_value":1e-1, "value":1e-3, "format":"%.4f"}),
             "max_iter": (st.slider, {"label":"Epochs", "min_value":50, "max_value":2000, "value":300}),
             "early_stopping": (st.checkbox, {"label":"Early stopping", "value":True}),
         }),
@@ -415,7 +481,7 @@ elif S["page"] == "train":
             "random_state": (st.number_input, {"label":"Random State", "value":42}),
         }),
         "SVR": (SVR, {"C": (st.slider, {"label":"C", "min_value":0.01, "max_value":10.0, "value":1.0}),
-                       "kernel": (st.selectbox, {"label":"Kernel", "options":["rbf","linear","poly"], "index":0})}),
+                        "kernel": (st.selectbox, {"label":"Kernel", "options":["rbf","linear","poly"], "index":0})}),
         "DecisionTreeRegressor": (DecisionTreeRegressor, {
             "max_depth": (st.slider, {"label":"Max depth", "min_value":1, "max_value":60, "value":10}),
         }),
@@ -426,7 +492,7 @@ elif S["page"] == "train":
         }),
         "MLPRegressor": (MLPRegressor, {
             "hidden_layer_sizes": (st.slider, {"label":"Hidden units", "min_value":8, "max_value":512, "value":128}),
-            "learning_rate_init": (st.slider, {"label":"LR", "min_value":1e-4, "max_value":1e-1, "value":1e-3}),
+            "learning_rate_init": (st.slider, {"label":"LR", "min_value":1e-4, "max_value":1e-1, "value":1e-3, "format":"%.4f"}),
             "max_iter": (st.slider, {"label":"Epochs", "min_value":50, "max_value":2000, "value":300}),
             "early_stopping": (st.checkbox, {"label":"Early stopping", "value":True}),
         }),
@@ -438,6 +504,7 @@ elif S["page"] == "train":
             "subsample": (st.slider, {"label":"Subsample", "min_value":0.5, "max_value":1.0, "value":0.9}),
             "colsample_bytree": (st.slider, {"label":"Colsample by tree", "min_value":0.5, "max_value":1.0, "value":0.9}),
         })
+    # ... [End of Model zoo dictionary definitions] ...
 
     zoo = models_cls if task=="Classification" else models_reg
     mname = st.selectbox("Model", list(zoo.keys()))
@@ -447,47 +514,225 @@ elif S["page"] == "train":
     with st.expander("Hyperparameters", expanded=True):
         for pname, (wfun, kwargs) in zoo[mname][1].items():
             label = kwargs.pop("label", pname)
-            widget_val = wfun(label, **kwargs)
+            # Safely handle format for sliders/number inputs
+            format_str = kwargs.pop("format", "%.2f") if wfun in [st.slider, st.number_input] else None
+            
+            if format_str:
+                widget_val = wfun(label, format=format_str, **kwargs)
+            else:
+                widget_val = wfun(label, **kwargs)
+
             # adapt for MLP hidden_layer_sizes (int -> tuple)
             if pname == "hidden_layer_sizes":
+                # Ensure it's a tuple of integers for the MLP model
                 widget_val = (int(widget_val),)
+            
+            # Handle max_depth=None for tree models
+            if pname == "max_depth" and widget_val == 60: # Using 60 as proxy for 'None' max value
+                if wfun == st.slider: # Only apply if it came from the slider
+                    widget_val = None
+            
             params[pname] = widget_val
-            st.caption(f"ℹ️ {pname}: {label}")
+            st.caption(f"ℹ️ **{pname}**")
 
-    # Train
+    # Train button logic
     if st.button("🚀 Train", type="primary"):
-        X = df.drop(columns=[S["target"]])
-        y = df[S["target"]]
-        # encode categoricals
-        for c in X.select_dtypes(include=["object","category"]).columns:
-            le = LabelEncoder()
-            X[c] = le.fit_transform(X[c].astype(str))
-        if task=="Classification" and y.dtype=="object":
-            y = LabelEncoder().fit_transform(y.astype(str))
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42,
-                                                            stratify=y if task=="Classification" else None)
-        Model = zoo[mname][0]
-        model = Model(**params)
-        t0 = time.time(); model.fit(X_train, y_train); t = time.time()-t0
-        y_pred = model.predict(X_test)
+        try:
+            # 1. Separate features (X) and target (y)
+            X = df.drop(columns=[S["target"]], errors='ignore').copy()
+            y = df[S["target"]].copy()
 
-        if task=="Classification":
-            acc = accuracy_score(y_test, y_pred)
-            f1 = f1_score(y_test, y_pred, average='weighted')
-            st.markdown(f"<div class='metric'><b>Accuracy</b> {acc*100:.2f}%</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='metric'><b>F1 (weighted)</b> {f1:.4f}</div>", unsafe_allow_html=True)
-            cm = confusion_matrix(y_test, y_pred)
-            fig, ax = plt.subplots(); sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax); st.pyplot(fig)
-            S["results"] = {"task":task, "model":mname, "accuracy":acc, "f1":f1, "train_time":round(t,3)}
-        else:
-            rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
-            r2 = float(r2_score(y_test, y_pred))
-            st.markdown(f"<div class='metric'><b>RMSE</b> {rmse:.4f}</div>", unsafe_allow_html=True)
-            st.markdown(f"<div class='metric'><b>R²</b> {r2:.4f}</div>", unsafe_allow_html=True)
-            S["results"] = {"task":task, "model":mname, "rmse":rmse, "r2":r2, "train_time":round(t,3)}
-        S["model"] = model
-        S["final_cols"] = list(X.columns)
-        st.success("Training complete. See Results or try Playground.")
+            # 2. Handle object/category types in X and y *before* preprocessor pipeline
+            categorical_cols_X = X.select_dtypes(include=['object', 'category']).columns.tolist()
+            numeric_cols_X = X.select_dtypes(include=[np.number]).columns.tolist()
+            
+            # Convert target to numeric if classification and object
+            if task == "Classification" and y.dtype in ['object', 'category']:
+                le_y = LabelEncoder()
+                y = le_y.fit_transform(y.astype(str))
+                S["label_encoders_y"] = le_y # Store for later use
+            else:
+                S["label_encoders_y"] = None
+
+            # 3. Train-Test Split (CRITICAL for data leakage prevention)
+            # Check for sufficient data
+            if len(X) < 20:
+                st.error("Dataset is too small for a 80/20 train-test split. Need at least 20 rows.")
+                st.stop()
+
+            stratify_y = y if task == "Classification" and unique_vals > 1 else None
+            # Handle case where stratify has too few samples per class
+            if stratify_y is not None:
+                small_classes = y.value_counts()[y.value_counts() < 2].index.tolist()
+                if small_classes:
+                    st.warning(f"Classification target has classes with < 2 samples: {small_classes}. Disabling stratification.")
+                    stratify_y = None
+
+            X_train_df, X_test_df, y_train, y_test = train_test_split(
+                X, y, test_size=0.2, random_state=42, stratify=stratify_y
+            )
+            
+            # 4. Build Preprocessor Pipeline based on configuration (NO FITTING YET)
+            numeric_steps = []
+            
+            # Imputation
+            if S["imputer_strategy"] != "None":
+                imputer_strat = S["imputer_strategy"].lower()
+                if imputer_strat == "most_frequent":
+                    numeric_steps.append(('imputer', SimpleImputer(strategy='most_frequent')))
+                else:
+                    numeric_steps.append(('imputer', SimpleImputer(strategy=imputer_strat)))
+
+            # Variance Threshold (always needs to be before scaling if applied)
+            if S["variance_threshold"] > 0.0:
+                 numeric_steps.append(('var_thresh', VarianceThreshold(threshold=S["variance_threshold"])))
+            
+            # Scaling
+            if S["scaler_name"] != "None":
+                scaler_map = {
+                    "Standard": StandardScaler(), "MinMax": MinMaxScaler(), 
+                    "Robust": RobustScaler(), "Normalize": Normalizer()
+                }
+                numeric_steps.append(('scaler', scaler_map[S["scaler_name"]]))
+
+            # Encoding
+            if S["encoding"] == "One-Hot":
+                # Use OneHotEncoder for categorical columns
+                categorical_transformer = Pipeline(steps=[
+                    ('imputer_cat', SimpleImputer(strategy='most_frequent')), # Impute categories
+                    ('onehot', OneHotEncoder(handle_unknown='ignore'))
+                ])
+                preprocessor = ColumnTransformer(
+                    transformers=[
+                        ('num', Pipeline(steps=numeric_steps), numeric_cols_X),
+                        ('cat', categorical_transformer, categorical_cols_X)
+                    ],
+                    remainder='passthrough' # Keep other columns (e.g., if you missed 'object' but not 'category')
+                )
+            elif S["encoding"] == "Label":
+                 # LabelEncoder is complex in ColumnTransformer, easier to do it manually *before* the CT for a simple flow
+                 # Note: Label encoding is often only suitable for tree models, as it introduces ordinality.
+                for c in categorical_cols_X:
+                    le = LabelEncoder()
+                    X_train_df[c] = le.fit_transform(X_train_df[c].astype(str))
+                    # Use fitted encoder to transform test data (handling unseen labels with .transform(labels) if possible)
+                    try:
+                        X_test_df[c] = le.transform(X_test_df[c].astype(str))
+                    except ValueError:
+                        st.warning(f"Unseen labels in test set for column '{c}'. Mapping unseen labels to -1.")
+                        # Handle unseen labels by mapping them to -1 (or similar)
+                        test_labels = X_test_df[c].astype(str)
+                        known_labels = set(le.classes_)
+                        X_test_df[c] = test_labels.apply(lambda x: le.transform([x])[0] if x in known_labels else -1)
+
+                # Now that categorical columns are numeric (labeled), treat them as numeric for scaling/imputation
+                numeric_cols_X = X_train_df.select_dtypes(include=[np.number]).columns.tolist()
+                
+                # Rebuild preprocessor with only numeric steps
+                preprocessor = ColumnTransformer(
+                    transformers=[
+                        ('num', Pipeline(steps=numeric_steps), numeric_cols_X)
+                    ],
+                    remainder='passthrough'
+                )
+            else: # No Encoding
+                # Only apply numeric steps
+                preprocessor = ColumnTransformer(
+                    transformers=[
+                        ('num', Pipeline(steps=numeric_steps), numeric_cols_X)
+                    ],
+                    remainder='passthrough'
+                )
+
+            # 5. Full Pipeline: Preprocessor + Model
+            Model = zoo[mname][0]
+            model_pipeline = Pipeline(steps=[
+                ('preprocessor', preprocessor),
+                ('classifier_regressor', Model(**params))
+            ])
+
+            # 6. SMOTE (Applied to training data only, after preprocessing)
+            if task == "Classification" and S["smote_enabled"] and IMB_OK:
+                # Need to transform X_train first to handle imputer/scaler
+                X_train_processed = model_pipeline['preprocessor'].fit_transform(X_train_df)
+                
+                # SMOTE application
+                sm = SMOTE(random_state=42)
+                X_train_res, y_train_res = sm.fit_resample(X_train_processed, y_train)
+                
+                # Fit the final model only on the resampled, processed data
+                t0 = time.time()
+                model_pipeline['classifier_regressor'].fit(X_train_res, y_train_res)
+                t = time.time() - t0
+                
+                # X_test needs to be transformed by the *fitted* preprocessor
+                X_test_processed = model_pipeline['preprocessor'].transform(X_test_df)
+                y_pred = model_pipeline['classifier_regressor'].predict(X_test_processed)
+                
+                st.info("SMOTE applied to training data.")
+
+            else:
+                # 7. Fit Pipeline (Preprocessor and Model)
+                t0 = time.time()
+                # Fit the entire pipeline on the original training data
+                model_pipeline.fit(X_train_df, y_train)
+                t = time.time() - t0
+
+                # 8. Predict on the Test Data (Test data is transformed by the *fitted* preprocessor)
+                y_pred = model_pipeline.predict(X_test_df)
+                
+                # Check for NaNs/Infs in prediction
+                if np.any(np.isnan(y_pred)) or np.any(np.isinf(y_pred)):
+                    st.error("Prediction generated NaN or Inf values. Training may have failed.")
+                    st.stop()
+
+
+            # 9. Store artifacts and results
+            S["model"] = model_pipeline
+            S["preprocessor_pipeline"] = model_pipeline['preprocessor']
+            # Reconstruct the final column list after preprocessing (for visualization/playground)
+            # This is complex, so we'll store the *original* X columns for the Playground PCA step.
+            S["final_cols"] = list(X.columns)
+
+            st.success("Training successful. Evaluating results...")
+
+            # 10. Evaluation and Visualization
+            if task == "Classification":
+                acc = accuracy_score(y_test, y_pred)
+                # Handle binary vs multiclass f1
+                average_f1 = 'binary' if len(np.unique(y_test)) == 2 else 'weighted'
+                f1 = f1_score(y_test, y_pred, average=average_f1, zero_division=0)
+                
+                st.markdown(f"<div class='metric'><b>Accuracy</b> {acc*100:.2f}%</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='metric'><b>F1 ({average_f1})</b> {f1:.4f}</div>", unsafe_allow_html=True)
+                
+                # Confusion Matrix
+                cm = confusion_matrix(y_test, y_pred)
+                fig, ax = plt.subplots(); 
+                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+                ax.set_title("Confusion Matrix")
+                st.pyplot(fig)
+                
+                S["results"] = {"task":task, "model":mname, "accuracy":acc, "f1":f1, "train_time":round(t,3), "params": params}
+            else: # Regression
+                rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
+                r2 = float(r2_score(y_test, y_pred))
+                
+                st.markdown(f"<div class='metric'><b>RMSE</b> {rmse:.4f}</div>", unsafe_allow_html=True)
+                st.markdown(f"<div class='metric'><b>R²</b> {r2:.4f}</div>", unsafe_allow_html=True)
+                
+                # Plot Actual vs Predicted (moved to Playground, just store results here)
+                
+                S["results"] = {"task":task, "model":mname, "rmse":rmse, "r2":r2, "train_time":round(t,3), "params": params}
+            
+            st.success("Training and Evaluation complete. See Results or try Playground.")
+
+        except Exception as e:
+            st.error(f"Training failed: {e}")
+            # Ensure model and results are reset on catastrophic failure
+            S["model"] = None
+            S["results"] = {}
+
 
 # ===================== PLAYGROUND (supervised) =====================
 elif S["page"] == "playground":
@@ -495,51 +740,157 @@ elif S["page"] == "playground":
     if S["df"] is None or S["target"] is None or S["model"] is None:
         st.info("Train a supervised model first.")
         st.stop()
+        
     df = S["df"]; target = S["target"]
-    X = df.drop(columns=[target]); y = df[target]
-    for c in X.select_dtypes(include=["object","category"]).columns:
-        X[c] = LabelEncoder().fit_transform(X[c].astype(str))
-    if y.dtype=="object": y = LabelEncoder().fit_transform(y.astype(str))
-
-    # reduce to 2D for visualization
-    pca = PCA(n_components=2)
-    X2 = pca.fit_transform(X)
-    st.caption("Visualizing data in 2D using PCA.")
-    fig = px.scatter(x=X2[:,0], y=X2[:,1], color=y.astype(str), labels={'x':'PC1','y':'PC2'}, title="Data (PCA)")
-    st.plotly_chart(fig, use_container_width=True)
-
-    # decision boundary (classification) or actual vs pred (regression)
-    model = S["model"]
+    # Get original features for test split
+    X_original = df.drop(columns=[target], errors='ignore').copy()
+    y_original = df[target].copy()
+    
     task = S["results"].get("task","Classification")
+    model_pipeline = S["model"]
+    preprocessor = S["preprocessor_pipeline"]
 
-    if task == "Classification":
-        # train model on PCA space for boundary
-        X_train, X_test, y_train, y_test = train_test_split(X2, y, test_size=0.2, random_state=42, stratify=y)
-        clone = type(model)(**getattr(model, 'get_params', lambda: {})())
+    # 1. Prepare Data for Playground (Apply *fitted* preprocessor to test set)
+    # The split is done here to ensure the Playground visualizations are on *unseen* data
+    stratify_y = y_original if task == "Classification" and y_original.nunique() > 1 else None
+    if stratify_y is not None:
+        small_classes = y_original.value_counts()[y_original.value_counts() < 2].index.tolist()
+        if small_classes:
+            st.warning(f"Classes with < 2 samples in target ({small_classes}). Disabling stratification for split.")
+            stratify_y = None
+            
+    X_train_orig, X_test_orig, y_train_orig, y_test_orig = train_test_split(
+        X_original, y_original, test_size=0.2, random_state=42, stratify=stratify_y
+    )
+
+    # Convert y_test to numeric if classification and it was object
+    if task == "Classification" and y_test_orig.dtype in ['object', 'category'] and S.get("label_encoders_y"):
         try:
-            clone.fit(X_train, y_train)
-            # grid
-            x_min, x_max = X2[:,0].min()-1, X2[:,0].max()+1
-            y_min, y_max = X2[:,1].min()-1, X2[:,1].max()+1
-            xx, yy = np.meshgrid(np.linspace(x_min, x_max, 200), np.linspace(y_min, y_max, 200))
-            Z = clone.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
-            fig2 = go.Figure()
-            fig2.add_trace(go.Contour(x=np.linspace(x_min,x_max,200), y=np.linspace(y_min,y_max,200), z=Z,
-                                      showscale=False, contours_coloring='heatmap', opacity=0.3))
-            fig2.add_trace(go.Scatter(x=X2[:,0], y=X2[:,1], mode='markers',
-                                      marker=dict(size=6), text=[str(v) for v in y]))
-            fig2.update_layout(title="Decision Boundary (PCA space)", xaxis_title="PC1", yaxis_title="PC2")
-            st.plotly_chart(fig2, use_container_width=True)
-        except Exception as e:
-            st.warning(f"Boundary viz not available for this model: {e}")
+            y_test = S["label_encoders_y"].transform(y_test_orig.astype(str))
+        except ValueError:
+            st.warning("Unseen labels in test set for target. Cannot visualize accurately.")
+            y_test = y_test_orig.astype(str) # Fallback to original labels
     else:
-        # regression: actual vs predicted
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-        y_pred = S["model"].predict(X_test)
-        fig3 = px.scatter(x=y_test, y=y_pred, labels={'x':'Actual','y':'Predicted'}, title='Actual vs Predicted')
-        fig3.add_shape(type='line', x0=float(np.min(y_test)), y0=float(np.min(y_test)),
-                       x1=float(np.max(y_test)), y1=float(np.max(y_test)))
-        st.plotly_chart(fig3, use_container_width=True)
+        y_test = y_test_orig
+
+    # Apply the fitted preprocessor from the training phase to the test data
+    try:
+        X_test_processed = preprocessor.transform(X_test_orig)
+    except Exception as e:
+        st.error(f"Failed to transform test data with fitted preprocessor: {e}. Cannot run playground.")
+        st.stop()
+
+    # 2. Reduce Processed Test Data to 2D for Visualization
+    st.markdown("### Data Visualization (PCA on Test Set)")
+    try:
+        pca = PCA(n_components=2)
+        X2 = pca.fit_transform(X_test_processed) # Fit PCA *only* on test set for visualization
+        st.caption(f"Visualizing **{len(X2)}** processed test samples in 2D using PCA.")
+        
+        # Ensure y_test is a string list for proper color mapping in Plotly
+        y_test_str = [str(v) for v in y_test]
+        
+        fig = px.scatter(x=X2[:,0], y=X2[:,1], color=y_test_str, 
+                         labels={'x':'PC1','y':'PC2', 'color':target}, 
+                         title="Test Data (PCA Projection)")
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception as e:
+        st.warning(f"Could not generate PCA plot: {e}")
+
+    # 3. Model-Specific Visualization
+    st.markdown("### Model Insight")
+    
+    if task == "Classification":
+        st.info("The Decision Boundary visualization requires training a new model *only* on the 2D PCA data, which may differ from the original model's performance.")
+        
+        # Train a new model on PCA space for boundary visualization (X_train_processed is from earlier)
+        # Note: Need the *processed* training data from the main split.
+        try:
+            # Rerun the original split and transformation on the training set
+            X_train_orig, _, y_train, _ = train_test_split(
+                X_original, y_original, test_size=0.2, random_state=42, stratify=stratify_y
+            )
+            X_train_processed = preprocessor.transform(X_train_orig)
+            
+            # Convert y_train to numeric if classification and it was object
+            if S.get("label_encoders_y"):
+                y_train = S["label_encoders_y"].transform(y_train_orig.astype(str))
+                
+            pca_vis = PCA(n_components=2)
+            X2_train = pca_vis.fit_transform(X_train_processed)
+            X2_test = pca_vis.transform(X_test_processed) # Apply the same PCA to test
+
+            # Get the underlying model from the pipeline
+            model_core = model_pipeline['classifier_regressor']
+            
+            # Clone model params safely
+            clone_params = model_core.get_params(deep=False)
+            # Remove keys that might not be applicable or cause issues when cloning (e.g., random_state)
+            if 'random_state' in clone_params: del clone_params['random_state']
+            if 'max_iter' in clone_params: clone_params['max_iter'] = 300 # Lower iter for faster viz training
+            
+            clone = type(model_core)(**clone_params)
+            clone.fit(X2_train, y_train)
+            
+            # Generate the grid for the decision boundary
+            x_min, x_max = X2[:,0].min()-0.5, X2[:,0].max()+0.5
+            y_min, y_max = X2[:,1].min()-0.5, X2[:,1].max()+0.5
+            xx, yy = np.meshgrid(np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100))
+            
+            Z = clone.predict(np.c_[xx.ravel(), yy.ravel()]).reshape(xx.shape)
+            
+            # Map numeric labels back to strings if possible for legend clarity
+            class_labels = [str(v) for v in np.unique(y_test)]
+            if S.get("label_encoders_y"):
+                try:
+                    class_labels = S["label_encoders_y"].inverse_transform(np.unique(y_test))
+                except Exception:
+                    pass # Keep numeric labels if inverse_transform fails
+                    
+            fig2 = go.Figure()
+            # Boundary Contour
+            fig2.add_trace(go.Contour(
+                x=np.linspace(x_min,x_max,100), y=np.linspace(y_min,y_max,100), z=Z,
+                showscale=False, contours_coloring='heatmap', opacity=0.3,
+                name="Decision Boundary"
+            ))
+            # Test Data Points
+            fig2.add_trace(go.Scatter(
+                x=X2_test[:,0], y=X2_test[:,1], mode='markers',
+                marker=dict(size=6, color=y_test), text=[str(v) for v in y_test_str],
+                name="Test Data Points"
+            ))
+            fig2.update_layout(title="Decision Boundary (PCA space)", 
+                               xaxis_title="PC1", yaxis_title="PC2")
+            st.plotly_chart(fig2, use_container_width=True)
+            
+        except Exception as e:
+            st.warning(f"Decision Boundary visualization not available for this model/data combination: {e}")
+            
+    else: # Regression: Actual vs Predicted
+        st.markdown("### Actual vs Predicted (Test Set)")
+        try:
+            y_pred = model_pipeline.predict(X_test_orig)
+            
+            # Check for NaNs/Infs in test prediction
+            if np.any(np.isnan(y_pred)) or np.any(np.isinf(y_pred)):
+                st.error("Model predicted NaN/Inf values on test set. Cannot plot.")
+                st.stop()
+                
+            fig3 = px.scatter(x=y_test, y=y_pred, 
+                             labels={'x':'Actual','y':'Predicted'}, 
+                             title=f'{model_pipeline["classifier_regressor"].__class__.__name__}: Actual vs Predicted')
+            
+            # Add y=x line
+            min_val = float(np.min(y_test))
+            max_val = float(np.max(y_test))
+            fig3.add_shape(type='line', x0=min_val, y0=min_val, x1=max_val, y1=max_val,
+                           line=dict(color='red', width=2, dash='dash'))
+            
+            st.plotly_chart(fig3, use_container_width=True)
+        except Exception as e:
+            st.error(f"Failed to generate Actual vs Predicted plot: {e}")
+
 
 # ===================== UNSUPERVISED =====================
 elif S["page"] == "unsupervised":
@@ -547,78 +898,181 @@ elif S["page"] == "unsupervised":
     if S["df"] is None:
         st.info("Upload a dataset first.")
         st.stop()
+        
     df = S["df"].copy()
-    # encode objects for algorithms
-    for c in df.select_dtypes(include=["object","category"]).columns:
-        df[c] = LabelEncoder().fit_transform(df[c].astype(str))
+    
+    # 1. Prepare Data for Unsupervised Learning
+    st.caption("All non-numeric features are label encoded for unsupervised algorithms.")
+    try:
+        for c in df.select_dtypes(include=["object","category"]).columns:
+            le = LabelEncoder()
+            # Handle NaNs by converting to string, then imputing or dropping later
+            df[c] = le.fit_transform(df[c].astype(str).fillna('NA_MISSING')) 
+        
+        # Impute NaNs in numeric columns (simple mean imputation for stability)
+        num_cols = df.select_dtypes(include=[np.number]).columns
+        if df[num_cols].isnull().any().any():
+            imputer = SimpleImputer(strategy='mean')
+            df[num_cols] = imputer.fit_transform(df[num_cols])
+            st.info("Numeric NaNs imputed with mean for stability.")
+            
+        # Standard Scale the data for distance-based algorithms
+        scaler = StandardScaler()
+        df_scaled = pd.DataFrame(scaler.fit_transform(df), columns=df.columns)
 
-    algo = st.selectbox("Algorithm", ["KMeans","DBSCAN","Agglomerative","GaussianMixture","IsolationForest","PCA (2D)"])
-    params = {}
-    if algo=="KMeans":
-        k = st.slider("k (clusters)", 2, 15, 4)
-        params["n_clusters"] = k
-        model = KMeans(**params, n_init=10)
-        labels = model.fit_predict(df)
-        sil = silhouette_score(df, labels) if len(set(labels))>1 else np.nan
-        st.caption(f"Silhouette: {sil:.4f}")
-    elif algo=="DBSCAN":
-        eps = st.slider("eps", 0.1, 10.0, 0.8)
-        min_s = st.slider("min_samples", 3, 50, 5)
-        model = DBSCAN(eps=eps, min_samples=min_s)
-        labels = model.fit_predict(df)
-    elif algo=="Agglomerative":
-        k = st.slider("clusters", 2, 15, 5)
-        model = AgglomerativeClustering(n_clusters=k)
-        labels = model.fit_predict(df)
-    elif algo=="GaussianMixture":
-        k = st.slider("components", 2, 15, 4)
-        model = GaussianMixture(n_components=k, random_state=42)
-        labels = model.fit_predict(df)
-    elif algo=="IsolationForest":
-        c = st.slider("contamination", 0.01, 0.4, 0.05)
-        model = IsolationForest(contamination=c, random_state=42)
-        labels = model.fit_predict(df)
-    else:  # PCA (2D)
-        pca = PCA(n_components=2); X2 = pca.fit_transform(df)
-        st.plotly_chart(px.scatter(x=X2[:,0], y=X2[:,1], title="PCA 2D"), use_container_width=True)
+    except Exception as e:
+        st.error(f"Data preparation for unsupervised learning failed: {e}")
         st.stop()
 
-    # visualize clusters in 2D
-    pca = PCA(n_components=2); X2 = pca.fit_transform(df)
-    fig = px.scatter(x=X2[:,0], y=X2[:,1], color=[str(v) for v in labels], title=f"{algo} — PCA Projection")
-    st.plotly_chart(fig, use_container_width=True)
-    S["unsup_labels"] = labels
+    # 2. Algorithm Selection and Parameter Tuning
+    algo = st.selectbox("Algorithm", ["KMeans","DBSCAN","Agglomerative","GaussianMixture","IsolationForest","PCA (2D)"])
+    
+    labels = None
+
+    if algo=="KMeans":
+        k = st.slider("k (clusters)", 2, 15, 4)
+        try:
+            model = KMeans(n_clusters=k, n_init=10, random_state=42)
+            labels = model.fit_predict(df_scaled)
+            sil = silhouette_score(df_scaled, labels) if len(np.unique(labels))>1 else np.nan
+            st.caption(f"Silhouette Score (higher is better): **{sil:.4f}**")
+        except Exception as e:
+            st.error(f"KMeans failed: {e}")
+            
+    elif algo=="DBSCAN":
+        eps = st.slider("eps (max distance)", 0.1, 5.0, 0.8) # Adjusted max for scaled data
+        min_s = st.slider("min_samples", 3, 50, 5)
+        try:
+            model = DBSCAN(eps=eps, min_samples=min_s)
+            labels = model.fit_predict(df_scaled)
+            st.caption(f"Number of clusters found: **{len(np.unique(labels)) - (1 if -1 in labels else 0)}** (Cluster **-1** is noise)")
+        except Exception as e:
+            st.error(f"DBSCAN failed: {e}")
+            
+    elif algo=="Agglomerative":
+        k = st.slider("clusters", 2, 15, 5)
+        try:
+            model = AgglomerativeClustering(n_clusters=k)
+            labels = model.fit_predict(df_scaled)
+            sil = silhouette_score(df_scaled, labels) if len(np.unique(labels))>1 else np.nan
+            st.caption(f"Silhouette Score: **{sil:.4f}**")
+        except Exception as e:
+            st.error(f"Agglomerative Clustering failed: {e}")
+            
+    elif algo=="GaussianMixture":
+        k = st.slider("components", 2, 15, 4)
+        try:
+            model = GaussianMixture(n_components=k, random_state=42)
+            labels = model.fit_predict(df_scaled)
+            # BIC can be used for model selection, but silhouette is better for visualization context
+            st.caption(f"Converged: **{model.converged_}**")
+        except Exception as e:
+            st.error(f"Gaussian Mixture failed: {e}")
+            
+    elif algo=="IsolationForest":
+        c = st.slider("contamination (anomaly fraction)", 0.01, 0.4, 0.05, format="%.2f")
+        try:
+            model = IsolationForest(contamination=c, random_state=42)
+            # fit_predict returns 1 for inliers, -1 for outliers
+            labels = model.fit_predict(df_scaled)
+            st.caption(f"Anomaly Count (label **-1**): **{np.sum(labels == -1)}**")
+        except Exception as e:
+            st.error(f"Isolation Forest failed: {e}")
+            
+    elif algo=="PCA (2D)":  # PCA (2D) is just for visualization/dim-red, no labels to store
+        st.markdown("### PCA Projection")
+        try:
+            pca = PCA(n_components=2)
+            X2 = pca.fit_transform(df_scaled)
+            st.plotly_chart(px.scatter(x=X2[:,0], y=X2[:,1], 
+                                       title="PCA 2D Projection (Scaled Data)",
+                                       labels={'x':f'PC1 ({pca.explained_variance_ratio_[0]:.2f})', 
+                                               'y':f'PC2 ({pca.explained_variance_ratio_[1]:.2f})'}), 
+                            use_container_width=True)
+            st.stop()
+        except Exception as e:
+            st.error(f"PCA visualization failed: {e}")
+            st.stop()
+
+    # 3. Visualize Results (if labels were generated)
+    if labels is not None:
+        try:
+            S["unsup_labels"] = labels
+            
+            st.markdown("### Cluster/Anomaly Visualization (PCA Projection)")
+            pca = PCA(n_components=2)
+            X2 = pca.fit_transform(df_scaled)
+            
+            # Convert labels to string for categorical coloring, including -1 for DBSCAN/IF
+            label_names = [str(v) for v in labels]
+            
+            fig = px.scatter(x=X2[:,0], y=X2[:,1], color=label_names, 
+                             labels={'x':'PC1','y':'PC2', 'color':'Cluster/Anomaly'}, 
+                             title=f"{algo} — PCA Projection of Scaled Data")
+            st.plotly_chart(fig, use_container_width=True)
+            
+        except Exception as e:
+            st.error(f"Visualization of {algo} results failed: {e}")
+
 
 # ===================== RESULTS & EMAIL =====================
 elif S["page"] == "results":
     st.title("Results & Reports")
     if not S["results"]:
-        st.info("Train a model to see results.")
+        st.info("Train a supervised model to see results.")
     else:
+        st.markdown("### Supervised Model Results")
+        
+        # Display key metrics in a cleaner way
+        c1, c2, c3 = st.columns(3)
+        
+        results = S["results"]
+        task = results.get("task", "Unknown")
+        
+        with c1:
+            st.metric("Model", results.get("model", "N/A"))
+        with c2:
+            st.metric("Task", task)
+        with c3:
+            st.metric("Train Time (s)", f"{results.get('train_time', 0):.3f}")
+            
+        st.markdown("---")
+
+        if task == "Classification":
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("Accuracy", f"{results.get('accuracy', 0)*100:.2f}%")
+            with c2:
+                st.metric("F1 Score", f"{results.get('f1', 0):.4f}")
+        elif task == "Regression":
+            c1, c2 = st.columns(2)
+            with c1:
+                st.metric("RMSE", f"{results.get('rmse', 0):.4f}")
+            with c2:
+                st.metric("R² Score", f"{results.get('r2', 0):.4f}")
+
+        st.markdown("### Full Results (JSON)")
         st.json(S["results"])
+        
+        # Email section
+        st.markdown("---")
+        st.markdown("### Send Report")
         if S["user_email"]:
             if st.button("📧 Send results to user", type="primary"):
-                ok = send_results_email(S["user_email"], "Your AutoMLPilot Results", S["results"])
-                st.success("Sent") if ok else st.error("Failed")
+                # Pass model and parameters for richer report
+                email_html = f"<p>Model: **{results.get('model', 'N/A')}** ({task})</p>"
+                ok = send_results_email(S["user_email"], "Your AutoMLPilot Results", S["results"], extra_html=email_html)
+                st.success("Report Sent!") if ok else st.error("Email Failed.")
         else:
-            st.warning("Enter recipient email on Dashboard.")
+            st.warning("Enter recipient email on **Dashboard** to enable email reports.")
 
 # ===================== HELP =====================
 elif S["page"] == "help":
     st.title("Help & Tips")
     st.markdown("""
+    ## 🧠 Modeling Guide
+
     **How to choose a model?**
-    - **Logistic Regression**: fast baseline for classification; good with linear relationships.
-    - **Random Forest / Gradient Boosting**: strong non‑linear learners; handle mixed features.
-    - **SVM**: robust for medium‑sized datasets; try RBF kernel.
-    - **KNN**: simple; useful when decision boundary is local.
-    - **Neural MLP**: try when you want non‑linear fits without feature crafting.
-    - **For regression**: start with Linear → Random Forest / GB → SVR / MLP.
-
-    **Preprocessing recipes**
-    - Use **One‑Hot** for categorical features with tree models (RF/GB) or linear models.
-    - Use **StandardScaler** for SVM/MLP/SVR.
-    - Remove extreme outliers with **IQR** when numeric ranges are skewed.
-
-    **Playground** renders PCA to 2D and shows decision boundaries (classification) or Actual vs Predicted (regression).
-    """)
+    * **Logistic Regression / Linear Regression**: Fast baseline; good for interpretable linear relationships.
+    * **Random Forest / Gradient Boosting**: Strong non-linear learners; handle mixed features (especially One-Hot encoding) well. Often a great starting point.
+    * **SVM / SVR**: Robust for medium-sized datasets, especially when separation is complex. Requires **StandardScaler**.
