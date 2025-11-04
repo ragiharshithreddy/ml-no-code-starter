@@ -20,8 +20,6 @@ from sklearn.metrics import (
     r2_score, mean_squared_error, mean_absolute_error, silhouette_score
 )
 from sklearn.decomposition import PCA
-from sklearn.pipeline import Pipeline
-from sklearn.compose import ColumnTransformer
 from sklearn.impute import SimpleImputer
 from sklearn.neighbors import KNeighborsClassifier, KNeighborsRegressor
 from sklearn.svm import SVC, SVR
@@ -79,37 +77,138 @@ SENDER_NAME = "AutoMLPilot"
 
 # Check if email is properly configured
 if ENABLE_EMAIL and (not OWNER_GMAIL or not OWNER_APP_PASSWORD):
-    st.sidebar.warning("⚠️ Email not configured. Set credentials in secrets.")
+    # st.sidebar.warning("⚠️ Email not configured. Set credentials in secrets.")
     ENABLE_EMAIL = False
 
 # ===================== PAGE CONFIG & THEME =====================
+# Set page layout to wide and remove sidebar margins for fixed layout
 st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
 
 THEME = """
 <style>
-  :root { --bg1: #ffe5f0; --bg2: #e6e9ff; --card: rgba(255,255,255,0.65); --border: rgba(255,255,255,0.35); }
-  .main { background: radial-gradient(1200px 600px at 10% 10%, var(--bg1), transparent),
-                         radial-gradient(900px 500px at 90% 20%, var(--bg2), transparent),
-                         linear-gradient(120deg,#f9fafb,#eef2ff); }
-  .block-container { padding: 1rem 2rem; }
-  h1,h2,h3,h4 { color:#0f172a; }
-  .topbar { position: sticky; top:0; z-index:1000; backdrop-filter: blur(12px);
-            background: linear-gradient(90deg, rgba(255,255,255,0.85), rgba(255,255,255,0.6));
-            border-bottom:1px solid var(--border); padding:.6rem 1rem; border-radius: 14px; }
-  .chip { display:inline-block; padding:.25rem .6rem; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; font-size:.8rem; }
-  .card { background: var(--card); border:1px solid var(--border); border-radius:20px; box-shadow: 0 12px 35px rgba(31,41,55,.12); padding:16px; }
-  .metric { background: rgba(255,255,255,0.75); border-left:4px solid #8b5cf6; border-radius:14px; padding:12px; margin:8px 0; }
-  .pillbtn button { border-radius:999px !important; }
-  .small { color:#475569; font-size:.85rem; }
-  .tooltip { color:#6b7280; font-size:.85rem; }
-  .error-box { background:#fee; border-left:4px solid #dc2626; padding:12px; border-radius:8px; margin:8px 0; }
-  .success-box { background:#efe; border-left:4px solid #16a34a; padding:12px; border-radius:8px; margin:8px 0; }
+    /* Gradient Background */
+    :root { 
+        --bg1: #ffe5f0; 
+        --bg2: #e6e9ff; 
+        --card: rgba(255,255,255,0.8); 
+        --border: rgba(255,255,255,0.35); 
+        --primary-color: #7c3aed;
+    }
+    .main { 
+        background: radial-gradient(1200px 600px at 10% 10%, var(--bg1), transparent),
+                radial-gradient(900px 500px at 90% 20%, var(--bg2), transparent),
+                linear-gradient(120deg,#f9fafb,#eef2ff); 
+    }
+    
+    /* Fixed Layout Overrides */
+    
+    /* Prevent overall page scrolling and set height */
+    .stApp {
+        min-height: 100vh;
+        max-height: 100vh;
+        overflow: hidden; /* Main app container should not scroll */
+    }
+    
+    /* Main Content Container: Fixed size & internal scroll */
+    .block-container { 
+        padding: 1rem 2rem 0rem 2rem; /* Reduced bottom padding to maximize space */
+        height: calc(100vh - 80px); /* Total viewport height minus header height */
+        overflow-y: auto; /* Internal scrolling for content */
+        margin-top: 80px; /* Offset for fixed header */
+        max-width: 100% !important;
+    }
+    
+    /* Fixed Header Styling */
+    .topbar { 
+        position: fixed; /* Fix position */
+        top: 0; 
+        left: 0;
+        right: 0;
+        z-index: 1000; 
+        height: 80px;
+        backdrop-filter: blur(12px);
+        background: linear-gradient(90deg, rgba(255,255,255,0.9), rgba(255,255,255,0.7)); 
+        border-bottom: 1px solid var(--border); 
+        padding: 0.6rem 2rem; 
+        display: flex;
+        align-items: center;
+        box-shadow: 0 4px 12px rgba(31,41,55,.05);
+    }
+    .topbar > div {
+        width: 100%;
+    }
+
+    /* Fixed Sidebar & Navigation Buttons */
+    .stSidebar {
+        position: fixed;
+        height: 100vh;
+        padding-top: 80px; /* Offset for fixed header */
+        z-index: 990;
+    }
+    /* Style for the sidebar radio/buttons */
+    [data-testid="stSidebarContent"] .stRadio > div {
+        flex-direction: column !important;
+        align-items: stretch;
+    }
+    [data-testid="stSidebarContent"] .stRadio > div > label {
+        margin-bottom: 8px;
+        padding: 0;
+    }
+    [data-testid="stSidebarContent"] .stRadio label > div {
+        /* Style the radio label as a pill button */
+        padding: 10px 15px;
+        border-radius: 999px;
+        border: 1px solid #c7d2fe;
+        color: #4338ca;
+        background: #eef2ff;
+        font-weight: 500;
+        text-align: left;
+        transition: all 0.2s ease;
+    }
+    [data-testid="stSidebarContent"] .stRadio label:hover > div {
+        background: #dce7ff;
+    }
+    [data-testid="stSidebarContent"] .stRadio input:checked + div > div {
+        /* Selected button style */
+        background: var(--primary-color);
+        color: white;
+        border-color: var(--primary-color);
+        box-shadow: 0 2px 5px rgba(124, 58, 237, 0.3);
+    }
+    [data-testid="stSidebarContent"] .stRadio input:checked + div > div > div:first-child {
+        background-color: transparent !important; /* Hide default radio dot */
+    }
+    /* Hide the default Streamlit radio dot entirely for the button style */
+    .stRadio input[type="radio"] {
+        display: none !important;
+    }
+
+
+    /* Existing styles */
+    h1,h2,h3,h4 { color:#0f172a; }
+    .chip { display:inline-block; padding:.25rem .6rem; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; font-size:.8rem; }
+    .card { background: var(--card); border:1px solid var(--border); border-radius:20px; box-shadow: 0 12px 35px rgba(31,41,55,.12); padding:16px; }
+    .metric { background: rgba(255,255,255,0.75); border-left:4px solid #8b5cf6; border-radius:14px; padding:12px; margin:8px 0; }
+    .pillbtn button { border-radius:999px !important; }
+    .small { color:#475569; font-size:.85rem; }
+    .tooltip { color:#6b7280; font-size:.85rem; }
+    .error-box { background:#fee; border-left:4px solid #dc2626; padding:12px; border-radius:8px; margin:8px 0; }
+    .success-box { background:#efe; border-left:4px solid #16a34a; padding:12px; border-radius:8px; margin:8px 0; }
+
+    /* Fix Plotly/Matplotlib in non-scrolling content */
+    .stPlotlyChart, .stImage, .stMatplotlib {
+        max-height: 55vh; /* Limit chart height if needed, otherwise default */
+        overflow: auto;
+    }
+    .stForm {
+        overflow: hidden; /* Prevents form from creating unwanted scrollbars */
+    }
 </style>
 """
 
 st.markdown(THEME, unsafe_allow_html=True)
 
-# ===================== HELPER FUNCTIONS =====================
+# ===================== HELPER FUNCTIONS (UNCHANGED) =====================
 def send_results_email(to_email: str, subject: str, results: dict, extra_html: str = ""):
     """Send results via email with proper error handling"""
     if not ENABLE_EMAIL:
@@ -219,6 +318,29 @@ def safe_train_test_split(X, y, test_size=0.2, task="Classification"):
         st.error(f"❌ Split failed: {str(e)}")
         return None, None, None, None
 
+def correlation_recommendations(df: pd.DataFrame, thresh=0.7):
+    """Find highly correlated feature pairs"""
+    try:
+        num_df = df.select_dtypes(include=[np.number])
+        if num_df.shape[1] < 2:
+            return []
+        
+        corr = num_df.corr()
+        recommendations = []
+        
+        for i, col1 in enumerate(corr.columns):
+            for j, col2 in enumerate(corr.columns):
+                if j <= i:
+                    continue
+                val = corr.iloc[i, j]
+                if abs(val) >= thresh:
+                    recommendations.append((col1, col2, float(val)))
+        
+        return sorted(recommendations, key=lambda x: -abs(x[2]))[:15]
+    except Exception as e:
+        st.error(f"❌ Correlation analysis failed: {str(e)}")
+        return []
+
 # ===================== SESSION STATE =====================
 if "S" not in st.session_state:
     st.session_state.S = {
@@ -241,11 +363,11 @@ if "S" not in st.session_state:
     }
 S = st.session_state.S
 
-# ===================== TOP BAR =====================
+# ===================== TOP BAR (FIXED) =====================
 with st.container():
     st.markdown(f"""
     <div class='topbar'>
-      <div style='display:flex;justify-content:space-between;align-items:center'>
+      <div style='display:flex;justify-content:space-between;align-items:center; width: 100%;'>
         <div style='display:flex;gap:.6rem;align-items:center'>
           <span>🌈</span>
           <strong>AutoMLPilot Pro</strong>
@@ -260,28 +382,45 @@ with st.container():
     </div>
     """, unsafe_allow_html=True)
 
-# ===================== SIDEBAR NAV =====================
+# ===================== SIDEBAR NAV (FIXED & BUTTON-STYLE) =====================
 with st.sidebar:
     st.subheader("🧭 Navigation")
-    pg = st.radio("", ["dashboard","preprocess","train","playground","unsupervised","results","help"],
-                  format_func=lambda x: {
-                      "dashboard":"📁 Dashboard",
-                      "preprocess":"🧹 Preprocess",
-                      "train":"🧠 Train (Supervised)",
-                      "playground":"🎨 Playground",
-                      "unsupervised":"🧩 Unsupervised",
-                      "results":"📊 Results",
-                      "help":"❓ Help"
-                  }[x], key="nav_radio")
+    
+    # Custom format_func and layout for button-style navigation
+    nav_options = ["dashboard", "preprocess", "train", "playground", "unsupervised", "results", "help"]
+    nav_labels = {
+        "dashboard":"📁 Dashboard",
+        "preprocess":"🧹 Preprocess",
+        "train":"🧠 Train (Supervised)",
+        "playground":"🎨 Playground",
+        "unsupervised":"🧩 Unsupervised",
+        "results":"📊 Results",
+        "help":"❓ Help"
+    }
+    
+    pg = st.radio(
+        "Select a Page", 
+        nav_options,
+        format_func=lambda x: nav_labels[x], 
+        key="nav_radio",
+        # Use a hidden label and custom CSS to make it button-like
+        label_visibility="collapsed" 
+    )
     S["page"] = pg
     
     st.markdown("---")
     if S["df"] is not None:
-        st.caption(f"📊 Dataset: {S['df'].shape[0]} rows × {S['df'].shape[1]} cols")
+        st.caption(f"📊 Dataset: **{S['df'].shape[0]}** rows × **{S['df'].shape[1]}** cols")
         if S["target"]:
-            st.caption(f"🎯 Target: {S['target']}")
+            st.caption(f"🎯 Target: **{S['target']}**")
+        if S.get("scaler_name"):
+            st.caption(f"✨ Scaling: **{S['scaler_name']}**")
+        st.caption(f"🤖 Model: **{S['results'].get('model', 'N/A')}**")
+        
+# ===================== MAIN CONTENT AREA (PAGED) =====================
+# The content below is contained within the single non-scrolling Streamlit 'main' area,
+# with the block-container CSS handling the internal scrolling for content overflow.
 
-# ===================== DASHBOARD =====================
 if S["page"] == "dashboard":
     st.title("📁 Dashboard")
     
@@ -293,7 +432,9 @@ if S["page"] == "dashboard":
         
         if uploaded_file is not None:
             try:
-                df = pd.read_csv(uploaded_file)
+                # Use st.spinner for a better UX during load time
+                with st.spinner("Loading and validating data..."):
+                    df = pd.read_csv(uploaded_file)
                 
                 # Validate dataset
                 is_valid, msg = validate_dataframe(df)
@@ -309,8 +450,8 @@ if S["page"] == "dashboard":
                 S["model"] = None
                 S["results"] = {}
                 
-                st.markdown(f"<div class='success-box'>✅ Loaded {df.shape[0]} rows × {df.shape[1]} columns</div>", 
-                           unsafe_allow_html=True)
+                st.markdown(f"<div class='success-box'>✅ Loaded **{df.shape[0]}** rows × **{df.shape[1]}** columns</div>", 
+                            unsafe_allow_html=True)
                 
                 # Show basic info
                 st.markdown("#### Dataset Info")
@@ -351,7 +492,7 @@ if S["page"] == "dashboard":
             st.info("✅ Email feature enabled")
         else:
             st.warning("⚠️ Email feature disabled. Configure credentials to enable.")
-            st.caption("Set OWNER_GMAIL and OWNER_APP_PASSWORD")
+            st.caption("Set OWNER_GMAIL and OWNER_APP_PASSWORD in the code secrets.")
     
     st.markdown("---")
     
@@ -363,6 +504,7 @@ if S["page"] == "dashboard":
             with st.spinner("Generating comprehensive report..."):
                 try:
                     report_html = profile_html(S["df"])
+                    # Use a controlled height for the HTML component
                     html(report_html, height=600, scrolling=True)
                 except Exception as e:
                     st.error(f"❌ EDA generation failed: {str(e)}")
@@ -389,7 +531,7 @@ elif S["page"] == "preprocess":
     # 1. Missing Values
     with st.expander("1️⃣ Handle Missing Values", expanded=True):
         missing_count = df.isnull().sum().sum()
-        st.caption(f"Total missing values: {missing_count}")
+        st.caption(f"Total missing values: **{missing_count}**")
         
         if missing_count > 0:
             strategy = st.selectbox(
@@ -403,7 +545,7 @@ elif S["page"] == "preprocess":
                     if strategy == "Drop_rows":
                         before = len(df)
                         df = df.dropna()
-                        st.success(f"✅ Dropped {before - len(df)} rows with missing values")
+                        st.success(f"✅ Dropped **{before - len(df)}** rows with missing values")
                         steps_applied.append(f"Dropped rows with missing values")
                     else:
                         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -411,14 +553,16 @@ elif S["page"] == "preprocess":
                         
                         if strategy in ["Mean", "Median"] and len(num_cols) > 0:
                             imputer = SimpleImputer(strategy=strategy.lower())
+                            # Imputer returns numpy array, convert back to DataFrame
                             df[num_cols] = imputer.fit_transform(df[num_cols])
-                            st.success(f"✅ Applied {strategy} imputation to numeric columns")
+                            st.success(f"✅ Applied **{strategy}** imputation to numeric columns")
                             steps_applied.append(f"{strategy} imputation (numeric)")
                         
                         if len(cat_cols) > 0:
                             imputer_cat = SimpleImputer(strategy="most_frequent")
+                            # SimpleImputer for most_frequent works on mixed types, but let's stick to cat columns for mode
                             df[cat_cols] = imputer_cat.fit_transform(df[cat_cols])
-                            st.success(f"✅ Applied most_frequent imputation to categorical columns")
+                            st.success(f"✅ Applied **most_frequent** imputation to categorical columns")
                             steps_applied.append("Most frequent imputation (categorical)")
                             
                 except Exception as e:
@@ -435,11 +579,12 @@ elif S["page"] == "preprocess":
         else:
             remove_outliers = st.checkbox("Remove outliers using IQR", value=False)
             iqr_multiplier = st.slider("IQR Multiplier", 1.0, 3.0, 1.5, 0.1,
-                                       help="Higher = more permissive")
+                                         help="Higher = more permissive")
             
             if remove_outliers:
                 try:
                     before = len(df)
+                    # Filter out outliers row by row (keeps original indices but they are reset below)
                     for col in num_cols:
                         q1, q3 = df[col].quantile([0.25, 0.75])
                         iqr = q3 - q1
@@ -448,7 +593,7 @@ elif S["page"] == "preprocess":
                         df = df[(df[col] >= lower) & (df[col] <= upper)]
                     
                     removed = before - len(df)
-                    st.success(f"✅ Removed {removed} rows ({removed/before*100:.1f}%) as outliers")
+                    st.success(f"✅ Removed **{removed}** rows ({removed/before*100:.1f}%) as outliers")
                     steps_applied.append(f"Removed {removed} outlier rows (IQR)")
                 except Exception as e:
                     st.error(f"❌ Outlier removal failed: {str(e)}")
@@ -460,17 +605,17 @@ elif S["page"] == "preprocess":
         if len(cat_cols) == 0:
             st.info("ℹ️ No categorical columns detected")
         else:
-            st.caption(f"Categorical columns: {', '.join(cat_cols)}")
+            st.caption(f"Categorical columns: **{', '.join(cat_cols)}**")
             enc_method = st.selectbox(
                 "Encoding Method",
                 ["None", "One-Hot", "Label"],
-                help="One-Hot: creates binary columns. Label: assigns integers."
+                help="One-Hot: creates binary columns. Label: assigns integers. One-Hot is usually preferred for non-linear models."
             )
             
             if enc_method == "One-Hot":
                 try:
                     df = pd.get_dummies(df, drop_first=True)
-                    st.success(f"✅ Applied one-hot encoding ({df.shape[1]} columns now)")
+                    st.success(f"✅ Applied one-hot encoding (**{df.shape[1]}** columns now)")
                     steps_applied.append("One-hot encoding")
                 except Exception as e:
                     st.error(f"❌ One-hot encoding failed: {str(e)}")
@@ -480,13 +625,14 @@ elif S["page"] == "preprocess":
                     for col in cat_cols:
                         le = LabelEncoder()
                         df[col] = le.fit_transform(df[col].astype(str))
-                    st.success(f"✅ Applied label encoding to {len(cat_cols)} columns")
+                    st.success(f"✅ Applied label encoding to **{len(cat_cols)}** columns")
                     steps_applied.append("Label encoding")
                 except Exception as e:
                     st.error(f"❌ Label encoding failed: {str(e)}")
     
     # 4. Scaling
     with st.expander("4️⃣ Feature Scaling", expanded=False):
+        # Re-check numeric columns after encoding, as One-Hot creates new ones
         num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
         
         if len(num_cols) == 0:
@@ -495,7 +641,7 @@ elif S["page"] == "preprocess":
             scale_method = st.selectbox(
                 "Scaling Method",
                 ["None", "Standard", "MinMax", "Robust", "Normalize"],
-                help="Standard: mean=0, std=1. MinMax: [0,1]. Robust: uses median/IQR"
+                help="Standard: mean=0, std=1. MinMax: [0,1]. Robust: uses median/IQR. Not necessary for tree-based models."
             )
             
             if scale_method != "None":
@@ -507,10 +653,17 @@ elif S["page"] == "preprocess":
                         "Normalize": Normalizer()
                     }
                     scaler = scaler_map[scale_method]
-                    df[num_cols] = scaler.fit_transform(df[num_cols])
+                    # Note: Normalizer is for row-wise scaling; others are column-wise
+                    if scale_method == "Normalize":
+                        # Normalizer operates on rows and returns a numpy array
+                        df[num_cols] = scaler.fit_transform(df[num_cols])
+                    else:
+                        # Other scalers operate on columns and return numpy array
+                        df[num_cols] = scaler.fit_transform(df[num_cols])
+                        
                     S["scaler"] = scaler
                     S["scaler_name"] = scale_method
-                    st.success(f"✅ Applied {scale_method} scaling")
+                    st.success(f"✅ Applied **{scale_method}** scaling")
                     steps_applied.append(f"{scale_method} scaling")
                 except Exception as e:
                     st.error(f"❌ Scaling failed: {str(e)}")
@@ -526,61 +679,47 @@ elif S["page"] == "preprocess":
             
             if use_variance:
                 threshold = st.slider("Variance Threshold", 0.0, 0.2, 0.01, 0.01,
-                                     help="Remove features with variance below this")
+                                         help="Remove features with variance below this (typically only after scaling)")
                 try:
                     selector = VarianceThreshold(threshold=threshold)
-                    arr = selector.fit_transform(df[num_cols])
-                    kept_cols = [num_cols[i] for i in selector.get_support(indices=True)]
+                    # Apply selector only to numeric features
+                    X_num = df[num_cols]
+                    selector.fit(X_num)
+                    kept_indices = selector.get_support(indices=True)
+                    kept_cols = [num_cols[i] for i in kept_indices]
                     
-                    # Combine with non-numeric
+                    # Separate non-numeric features to combine back
                     non_num = df.select_dtypes(exclude=[np.number])
+                    
+                    # Create the new DataFrame with selected numeric features and original non-numeric ones
                     df = pd.concat([
-                        pd.DataFrame(arr, columns=kept_cols),
-                        non_num.reset_index(drop=True)
+                        pd.DataFrame(selector.transform(X_num), columns=kept_cols, index=df.index),
+                        non_num
                     ], axis=1)
                     
                     removed = len(num_cols) - len(kept_cols)
-                    st.success(f"✅ Removed {removed} low-variance features. Kept {len(kept_cols)}")
+                    st.success(f"✅ Removed **{removed}** low-variance features. Kept **{len(kept_cols)}** numeric features.")
                     steps_applied.append(f"Removed {removed} low-variance features")
                 except Exception as e:
                     st.error(f"❌ Feature selection failed: {str(e)}")
     
     # Apply preprocessing
+    st.markdown("---")
     if st.button("💾 Apply Preprocessing", type="primary"):
+        # Drop rows that may have NaNs after previous steps (e.g., division by zero)
+        df = df.dropna().reset_index(drop=True)
+        
         S["df"] = df
         S["preprocessing_steps"].extend(steps_applied)
-        st.success(f"✅ Applied {len(steps_applied)} preprocessing steps")
+        st.success(f"✅ Applied **{len(steps_applied)}** preprocessing steps. Dataset size: {df.shape[0]} rows.")
         st.info("Move to Train tab to build models")
+        st.rerun() # Rerun to update the dataframe info in the sidebar and ensure clean session state
     
     # Show current preprocessing steps
     if S["preprocessing_steps"]:
         with st.expander("📋 Applied Preprocessing Steps"):
             for i, step in enumerate(S["preprocessing_steps"], 1):
-                st.caption(f"{i}. {step}")
-
-# ===================== FEATURE ENGINEERING HELPERS =====================
-def correlation_recommendations(df: pd.DataFrame, thresh=0.7):
-    """Find highly correlated feature pairs"""
-    try:
-        num_df = df.select_dtypes(include=[np.number])
-        if num_df.shape[1] < 2:
-            return []
-        
-        corr = num_df.corr()
-        recommendations = []
-        
-        for i, col1 in enumerate(corr.columns):
-            for j, col2 in enumerate(corr.columns):
-                if j <= i:
-                    continue
-                val = corr.iloc[i, j]
-                if abs(val) >= thresh:
-                    recommendations.append((col1, col2, float(val)))
-        
-        return sorted(recommendations, key=lambda x: -abs(x[2]))[:15]
-    except Exception as e:
-        st.error(f"❌ Correlation analysis failed: {str(e)}")
-        return []
+                st.caption(f"• {step}")
 
 # ===================== TRAIN (SUPERVISED) =====================
 elif S["page"] == "train":
@@ -612,6 +751,7 @@ elif S["page"] == "train":
             "Select Target Variable (y)",
             target_options,
             index=target_idx,
+            key="target_select",
             help="The variable you want to predict"
         )
     
@@ -619,12 +759,18 @@ elif S["page"] == "train":
         st.warning("⚠️ Please select a target variable to continue")
         st.stop()
     
+    # Ensure target column has no NaNs
+    if df[S["target"]].isnull().any():
+        st.error("❌ Target variable contains missing values. Please handle them in Preprocess page.")
+        st.stop()
+
     with col2:
         # Auto-detect task type
         n_unique = df[S["target"]].nunique()
         is_numeric = pd.api.types.is_numeric_dtype(df[S["target"]])
         
-        if is_numeric and n_unique > 20:
+        # Heuristic: Classification if few unique values (<= 20) or non-numeric
+        if is_numeric and n_unique > 20 and df[S["target"]].dtype not in ['int64', 'int32']:
             suggested_task = "Regression"
         else:
             suggested_task = "Classification"
@@ -633,8 +779,10 @@ elif S["page"] == "train":
             "Task Type",
             ["Classification", "Regression"],
             index=0 if suggested_task == "Classification" else 1,
-            help=f"Suggested: {suggested_task} ({n_unique} unique values)"
+            key="task_radio",
+            help=f"Suggested: **{suggested_task}** ({n_unique} unique values)"
         )
+        S["task"] = task # Store detected/selected task
     
     # Feature Engineering
     with st.expander("✨ Feature Engineering", expanded=False):
@@ -646,7 +794,7 @@ elif S["page"] == "train":
         if recommendations:
             rec_df = pd.DataFrame(recommendations, columns=["Feature A", "Feature B", "Correlation"])
             st.dataframe(rec_df, use_container_width=True)
-            st.caption("💡 Highly correlated features above. Consider creating combinations.")
+            st.caption("💡 Highly correlated features above. Consider dropping one or creating combinations.")
         else:
             st.info("ℹ️ No strongly correlated feature pairs found (|r| >= 0.7)")
         
@@ -662,10 +810,14 @@ elif S["page"] == "train":
                 operation = st.selectbox("Operation", ["+", "-", "*", "/", "**"], key="operation")
             
             with col_b:
-                feat2 = st.selectbox("Feature 2", [c for c in feature_cols if c != feat1], key="feat2")
+                feat2_options = [c for c in feature_cols if c != feat1]
+                if feat2_options:
+                    feat2 = st.selectbox("Feature 2", feat2_options, key="feat2")
+                else:
+                    feat2 = None
                 new_name = st.text_input("New feature name", placeholder="e.g., ratio_a_b", key="new_feat_name")
             
-            if st.button("➕ Create Feature"):
+            if feat2 is not None and st.button("➕ Create Feature"):
                 if not new_name:
                     st.error("❌ Please provide a feature name")
                 elif new_name in df.columns:
@@ -679,14 +831,18 @@ elif S["page"] == "train":
                         elif operation == "*":
                             df[new_name] = df[feat1] * df[feat2]
                         elif operation == "/":
-                            df[new_name] = df[feat1] / df[feat2].replace(0, np.nan)
-                            df[new_name].fillna(0, inplace=True)
+                            # Handle division by zero gracefully
+                            with warnings.catch_warnings():
+                                warnings.simplefilter("ignore", RuntimeWarning)
+                                df[new_name] = np.divide(df[feat1], df[feat2].replace(0, np.nan))
+                            df[new_name].replace([np.inf, -np.inf], np.nan, inplace=True)
+                            df[new_name].fillna(0, inplace=True) # Impute NaNs/Infs from division by zero
                         elif operation == "**":
                             df[new_name] = df[feat1] ** df[feat2]
                         
                         S["df"] = df
                         S["features_created"].append(new_name)
-                        st.success(f"✅ Feature '{new_name}' created successfully!")
+                        st.success(f"✅ Feature '**{new_name}**' created successfully!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"❌ Feature creation failed: {str(e)}")
@@ -695,8 +851,7 @@ elif S["page"] == "train":
         
         if S["features_created"]:
             st.markdown("**Created Features:**")
-            for feat in S["features_created"]:
-                st.caption(f"• {feat}")
+            st.caption(f"• {' • '.join(S['features_created'])}")
     
     # Model Selection
     st.markdown("### 🤖 Model Selection")
@@ -706,24 +861,18 @@ elif S["page"] == "train":
         "LogisticRegression": {
             "class": LogisticRegression,
             "params": {
-                "C": {"type": "slider", "min": 0.01, "max": 10.0, "value": 1.0, "step": 0.1, 
-                      "help": "Inverse of regularization strength. Lower = more regularization"},
-                "max_iter": {"type": "slider", "min": 100, "max": 2000, "value": 500, "step": 100,
-                            "help": "Maximum iterations for convergence"},
-                "solver": {"type": "select", "options": ["lbfgs", "liblinear", "saga"], "index": 0,
-                          "help": "Algorithm for optimization"}
+                "C": {"type": "slider", "min": 0.01, "max": 10.0, "value": 1.0, "step": 0.1,  "help": "Inverse of regularization strength. Lower = more regularization"},
+                "max_iter": {"type": "slider", "min": 100, "max": 2000, "value": 500, "step": 100, "help": "Maximum iterations for convergence"},
+                "solver": {"type": "select", "options": ["lbfgs", "liblinear", "saga"], "index": 0, "help": "Algorithm for optimization"}
             },
             "description": "Fast linear model for binary/multiclass. Good baseline."
         },
         "RandomForestClassifier": {
             "class": RandomForestClassifier,
             "params": {
-                "n_estimators": {"type": "slider", "min": 50, "max": 500, "value": 100, "step": 50,
-                                "help": "Number of trees in the forest"},
-                "max_depth": {"type": "slider", "min": 3, "max": 50, "value": 10, "step": 1,
-                             "help": "Maximum depth of trees. None = unlimited"},
-                "min_samples_split": {"type": "slider", "min": 2, "max": 20, "value": 2, "step": 1,
-                                     "help": "Minimum samples to split a node"},
+                "n_estimators": {"type": "slider", "min": 50, "max": 500, "value": 100, "step": 50, "help": "Number of trees in the forest"},
+                "max_depth": {"type": "slider", "min": 3, "max": 50, "value": 10, "step": 1, "help": "Maximum depth of trees. None = unlimited"},
+                "min_samples_split": {"type": "slider", "min": 2, "max": 20, "value": 2, "step": 1, "help": "Minimum samples to split a node"},
                 "random_state": {"type": "number", "value": 42}
             },
             "description": "Ensemble of decision trees. Handles non-linear patterns well."
@@ -732,8 +881,7 @@ elif S["page"] == "train":
             "class": GradientBoostingClassifier,
             "params": {
                 "n_estimators": {"type": "slider", "min": 50, "max": 500, "value": 100, "step": 50},
-                "learning_rate": {"type": "slider", "min": 0.01, "max": 0.3, "value": 0.1, "step": 0.01,
-                                 "help": "Shrinks contribution of each tree"},
+                "learning_rate": {"type": "slider", "min": 0.01, "max": 0.3, "value": 0.1, "step": 0.01, "help": "Shrinks contribution of each tree"},
                 "max_depth": {"type": "slider", "min": 3, "max": 10, "value": 3, "step": 1},
                 "random_state": {"type": "number", "value": 42}
             },
@@ -743,8 +891,7 @@ elif S["page"] == "train":
             "class": SVC,
             "params": {
                 "C": {"type": "slider", "min": 0.1, "max": 10.0, "value": 1.0, "step": 0.1},
-                "kernel": {"type": "select", "options": ["rbf", "linear", "poly"], "index": 0,
-                          "help": "Kernel type for non-linear boundaries"},
+                "kernel": {"type": "select", "options": ["rbf", "linear", "poly"], "index": 0, "help": "Kernel type for non-linear boundaries"},
                 "probability": {"type": "checkbox", "value": True, "help": "Enable probability estimates"}
             },
             "description": "Support Vector Machine. Good for medium datasets."
@@ -752,8 +899,7 @@ elif S["page"] == "train":
         "KNeighborsClassifier": {
             "class": KNeighborsClassifier,
             "params": {
-                "n_neighbors": {"type": "slider", "min": 3, "max": 30, "value": 5, "step": 2,
-                               "help": "Number of neighbors to consider"}
+                "n_neighbors": {"type": "slider", "min": 3, "max": 30, "value": 5, "step": 2, "help": "Number of neighbors to consider"}
             },
             "description": "Simple instance-based learning. Fast training."
         },
@@ -774,8 +920,7 @@ elif S["page"] == "train":
         "MLPClassifier": {
             "class": MLPClassifier,
             "params": {
-                "hidden_layer_sizes": {"type": "slider", "min": 32, "max": 256, "value": 100, "step": 32,
-                                      "help": "Neurons in hidden layer"},
+                "hidden_layer_sizes": {"type": "slider", "min": 32, "max": 256, "value": 100, "step": 32, "help": "Neurons in hidden layer"},
                 "learning_rate_init": {"type": "slider", "min": 0.0001, "max": 0.01, "value": 0.001, "step": 0.0001},
                 "max_iter": {"type": "slider", "min": 200, "max": 1000, "value": 500, "step": 100},
                 "early_stopping": {"type": "checkbox", "value": True},
@@ -794,16 +939,14 @@ elif S["page"] == "train":
         "Ridge": {
             "class": Ridge,
             "params": {
-                "alpha": {"type": "slider", "min": 0.1, "max": 10.0, "value": 1.0, "step": 0.1,
-                         "help": "L2 regularization strength"}
+                "alpha": {"type": "slider", "min": 0.1, "max": 10.0, "value": 1.0, "step": 0.1, "help": "L2 regularization strength"}
             },
             "description": "Linear regression with L2 regularization."
         },
         "Lasso": {
             "class": Lasso,
             "params": {
-                "alpha": {"type": "slider", "min": 0.1, "max": 10.0, "value": 1.0, "step": 0.1,
-                         "help": "L1 regularization (feature selection)"}
+                "alpha": {"type": "slider", "min": 0.1, "max": 10.0, "value": 1.0, "step": 0.1, "help": "L1 regularization (feature selection)"}
             },
             "description": "Linear regression with L1 regularization. Can zero out features."
         },
@@ -811,8 +954,7 @@ elif S["page"] == "train":
             "class": ElasticNet,
             "params": {
                 "alpha": {"type": "slider", "min": 0.1, "max": 10.0, "value": 1.0, "step": 0.1},
-                "l1_ratio": {"type": "slider", "min": 0.0, "max": 1.0, "value": 0.5, "step": 0.1,
-                            "help": "Mix of L1 and L2: 0=Ridge, 1=Lasso"}
+                "l1_ratio": {"type": "slider", "min": 0.0, "max": 1.0, "value": 0.5, "step": 0.1, "help": "Mix of L1 and L2: 0=Ridge, 1=Lasso"}
             },
             "description": "Combines L1 and L2 regularization."
         },
@@ -904,6 +1046,7 @@ elif S["page"] == "train":
     model_name = st.selectbox(
         "Choose Model",
         list(model_zoo.keys()),
+        key="model_select",
         help="Select algorithm for training"
     )
     
@@ -921,47 +1064,54 @@ elif S["page"] == "train":
         
         for param_name, config in param_config.items():
             with cols[col_idx % 2]:
+                # Streamlit input type mapping
                 if config["type"] == "slider":
-                    if "step" in config:
+                    if isinstance(config["value"], float):
                         value = st.slider(
                             param_name,
                             min_value=config["min"],
                             max_value=config["max"],
                             value=config["value"],
-                            step=config["step"],
-                            help=config.get("help", "")
+                            step=config.get("step", (config["max"] - config["min"]) / 100),
+                            help=config.get("help", ""),
+                            key=f"{model_name}_{param_name}"
                         )
-                    else:
-                        value = st.slider(
+                    else: # Integer slider
+                         value = st.slider(
                             param_name,
-                            min_value=config["min"],
-                            max_value=config["max"],
-                            value=config["value"],
-                            help=config.get("help", "")
+                            min_value=int(config["min"]),
+                            max_value=int(config["max"]),
+                            value=int(config["value"]),
+                            step=int(config.get("step", 1)),
+                            help=config.get("help", ""),
+                            key=f"{model_name}_{param_name}"
                         )
                 elif config["type"] == "select":
                     value = st.selectbox(
                         param_name,
                         config["options"],
                         index=config.get("index", 0),
-                        help=config.get("help", "")
+                        help=config.get("help", ""),
+                        key=f"{model_name}_{param_name}"
                     )
                 elif config["type"] == "checkbox":
                     value = st.checkbox(
                         param_name,
                         value=config["value"],
-                        help=config.get("help", "")
+                        help=config.get("help", ""),
+                        key=f"{model_name}_{param_name}"
                     )
                 elif config["type"] == "number":
                     value = st.number_input(
                         param_name,
                         value=config["value"],
-                        help=config.get("help", "")
+                        help=config.get("help", ""),
+                        key=f"{model_name}_{param_name}"
                     )
                 else:
                     value = config["value"]
                 
-                # Special handling for MLP hidden_layer_sizes
+                # Special handling for MLP hidden_layer_sizes (requires a tuple)
                 if param_name == "hidden_layer_sizes":
                     model_params[param_name] = (int(value),)
                 else:
@@ -974,11 +1124,11 @@ elif S["page"] == "train":
     # Training configuration
     with st.expander("🎛️ Training Configuration", expanded=False):
         test_size = st.slider("Test Set Size", 0.1, 0.4, 0.2, 0.05,
-                             help="Proportion of data for testing")
+                                 help="Proportion of data for testing")
         
         if task == "Classification" and IMB_OK:
             use_smote = st.checkbox("Use SMOTE for class balancing", value=False,
-                                   help="Oversample minority classes")
+                                     help="Oversample minority classes")
         else:
             use_smote = False
     
@@ -992,11 +1142,6 @@ elif S["page"] == "train":
                 X = df.drop(columns=[S["target"]])
                 y = df[S["target"]]
                 
-                # Handle missing values in target
-                if y.isnull().any():
-                    st.error("❌ Target variable contains missing values. Please handle them in preprocessing.")
-                    st.stop()
-                
                 # Encode categorical features
                 X, encoders = safe_label_encode(X)
                 S["label_encoders"] = encoders
@@ -1005,6 +1150,7 @@ elif S["page"] == "train":
                 target_encoder = None
                 if task == "Classification" and y.dtype == "object":
                     target_encoder = LabelEncoder()
+                    # Ensure all values are strings before fit_transform
                     y = target_encoder.fit_transform(y.astype(str))
                 
                 # Train-test split
@@ -1020,7 +1166,7 @@ elif S["page"] == "train":
                     try:
                         smote = SMOTE(random_state=42)
                         X_train, y_train = smote.fit_resample(X_train, y_train)
-                        st.info("✅ Applied SMOTE balancing")
+                        st.info("✅ Applied SMOTE balancing to training data")
                     except Exception as e:
                         st.warning(f"⚠️ SMOTE failed: {str(e)}. Continuing without SMOTE.")
                 
@@ -1043,12 +1189,14 @@ elif S["page"] == "train":
                     "training_time_sec": round(training_time, 3),
                     "train_samples": len(X_train),
                     "test_samples": len(X_test),
-                    "features": X.shape[1]
+                    "features": X.shape[1],
+                    "parameters": model_params
                 }
                 
                 if task == "Classification":
                     accuracy = accuracy_score(y_test, y_pred)
-                    f1 = f1_score(y_test, y_pred, average='weighted')
+                    # Handle multi-class F1 by using 'weighted' average
+                    f1 = f1_score(y_test, y_pred, average='weighted', zero_division=0)
                     
                     results["accuracy"] = round(accuracy, 4)
                     results["f1_score"] = round(f1, 4)
@@ -1069,18 +1217,21 @@ elif S["page"] == "train":
                     cm = confusion_matrix(y_test, y_pred)
                     
                     fig, ax = plt.subplots(figsize=(8, 6))
-                    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax)
+                    sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax, 
+                                xticklabels=target_encoder.classes_ if target_encoder else np.unique(y_test), 
+                                yticklabels=target_encoder.classes_ if target_encoder else np.unique(y_test))
                     ax.set_xlabel('Predicted')
                     ax.set_ylabel('Actual')
                     ax.set_title('Confusion Matrix')
                     st.pyplot(fig)
-                    plt.close()
+                    plt.close(fig) # Close figure to free memory
                     
                     # Classification Report
                     with st.expander("📋 Detailed Classification Report"):
-                        report = classification_report(y_test, y_pred)
-                        st.text(report)
-                
+                        report = classification_report(y_test, y_pred, output_dict=True, zero_division=0)
+                        results['classification_report'] = report
+                        st.json(report)
+                        
                 else:  # Regression
                     rmse = float(np.sqrt(mean_squared_error(y_test, y_pred)))
                     mae = float(mean_absolute_error(y_test, y_pred))
@@ -1110,11 +1261,14 @@ elif S["page"] == "train":
                         labels={'x': 'Actual', 'y': 'Predicted'},
                         title='Regression: Actual vs Predicted'
                     )
+                    min_val = min(y_test.min(), y_pred.min())
+                    max_val = max(y_test.max(), y_pred.max())
+                    # Perfect prediction reference line
                     fig.add_shape(
                         type='line',
-                        x0=float(np.min(y_test)), y0=float(np.min(y_test)),
-                        x1=float(np.max(y_test)), y1=float(np.max(y_test)),
-                        line=dict(color='red', dash='dash')
+                        x0=min_val, y0=min_val,
+                        x1=max_val, y1=max_val,
+                        line=dict(color='red', dash='dash', width=2)
                     )
                     st.plotly_chart(fig, use_container_width=True)
                     
@@ -1134,7 +1288,7 @@ elif S["page"] == "train":
                 S["results"] = results
                 S["task"] = task
                 
-                st.success("✅ Training completed successfully! Check the Playground or Results tab.")
+                st.success("✅ Training completed successfully! Check the **Playground** or **Results** tab.")
                 
         except Exception as e:
             st.error(f"❌ Training failed: {str(e)}")
@@ -1156,26 +1310,32 @@ elif S["page"] == "playground":
         model = S["model"]
         task = S.get("task", "Classification")
         
-        # Prepare data
-        X = df.drop(columns=[target])
+        # Prepare data (Need to re-encode for safety as state might be stale)
+        X = df.drop(columns=[target]).fillna(0) # Basic imputation for visualization robustness
         y = df[target]
         
-        # Encode
+        # Encode features (needed for PCA/Model consistency)
         X, _ = safe_label_encode(X)
         if y.dtype == "object":
-            y = LabelEncoder().fit_transform(y.astype(str))
+            # Re-encode target if it's categorical/object
+            target_encoder = LabelEncoder()
+            y = target_encoder.fit_transform(y.astype(str))
         
         st.markdown("### 🔮 Model Visualization")
         
         # PCA for 2D visualization
-        if X.shape[1] > 2:
+        X_data = X.values # Use numerical data
+        if X_data.shape[1] > 2:
             pca = PCA(n_components=2)
-            X_2d = pca.fit_transform(X)
+            X_2d = pca.fit_transform(X_data)
             explained_var = pca.explained_variance_ratio_
-            st.caption(f"📊 PCA: {explained_var[0]*100:.1f}% + {explained_var[1]*100:.1f}% = {sum(explained_var)*100:.1f}% variance explained")
-        else:
-            X_2d = X.values
+            st.caption(f"📊 PCA: **{explained_var[0]*100:.1f}%** + **{explained_var[1]*100:.1f}%** = **{sum(explained_var)*100:.1f}%** variance explained")
+        elif X_data.shape[1] == 2:
+            X_2d = X_data
             st.caption("📊 Using original 2D features")
+        else:
+            st.warning("⚠️ Cannot perform 2D visualization with fewer than 2 features.")
+            st.stop()
         
         # Data distribution
         fig1 = px.scatter(
@@ -1200,17 +1360,13 @@ elif S["page"] == "playground":
                 if X_train is not None:
                     # Clone model with same params
                     ModelClass = type(model)
-                    try:
-                        params = model.get_params()
-                    except:
-                        params = {}
-                    
+                    params = model.get_params()
                     vis_model = ModelClass(**params)
                     vis_model.fit(X_train, y_train)
                     
                     # Create mesh
-                    x_min, x_max = X_2d[:, 0].min() - 1, X_2d[:, 0].max() + 1
-                    y_min, y_max = X_2d[:, 1].min() - 1, X_2d[:, 1].max() + 1
+                    x_min, x_max = X_2d[:, 0].min() - 0.5, X_2d[:, 0].max() + 0.5
+                    y_min, y_max = X_2d[:, 1].min() - 0.5, X_2d[:, 1].max() + 0.5
                     
                     xx, yy = np.meshgrid(
                         np.linspace(x_min, x_max, 100),
@@ -1223,14 +1379,14 @@ elif S["page"] == "playground":
                     # Plot
                     fig2 = go.Figure()
                     
-                    # Decision boundary
-                    fig2.add_trace(go.Contour(
+                    # Decision boundary (Contour fill)
+                    fig2.add_trace(go.Heatmap(
                         x=np.linspace(x_min, x_max, 100),
                         y=np.linspace(y_min, y_max, 100),
                         z=Z,
                         showscale=False,
                         opacity=0.4,
-                        colorscale='Viridis',
+                        colorscale=[[0, 'pink'], [1/(len(np.unique(y))-1), 'lightblue'], [1, 'lightgreen']],
                         hoverinfo='skip'
                     ))
                     
@@ -1249,17 +1405,19 @@ elif S["page"] == "playground":
                         title='Decision Boundary (PCA Space)',
                         xaxis_title='Component 1',
                         yaxis_title='Component 2',
-                        showlegend=True
+                        showlegend=True,
+                        hovermode='closest'
                     )
                     
                     st.plotly_chart(fig2, use_container_width=True)
                     
             except Exception as e:
-                st.warning(f"⚠️ Decision boundary visualization not available: {str(e)}")
+                st.warning(f"⚠️ Decision boundary visualization not fully available for this model/data. Error: {str(e)}")
         
         else:  # Regression
             st.markdown("#### 📈 Prediction Analysis")
             
+            # Re-run a test split for visualization robustness
             X_train, X_test, y_train, y_test = safe_train_test_split(
                 X, y, test_size=0.2, task="Regression"
             )
@@ -1267,44 +1425,36 @@ elif S["page"] == "playground":
             if X_test is not None:
                 y_pred = model.predict(X_test)
                 
-                # Actual vs Predicted with error bars
-                errors = np.abs(y_test - y_pred)
-                
-                fig3 = go.Figure()
-                
-                fig3.add_trace(go.Scatter(
+                # Actual vs Predicted Scatter
+                fig3 = px.scatter(
                     x=y_test,
                     y=y_pred,
-                    mode='markers',
-                    marker=dict(
-                        size=8,
-                        color=errors,
-                        colorscale='Reds',
-                        showscale=True,
-                        colorbar=dict(title="Error")
-                    ),
-                    text=[f"Actual: {a:.2f}<br>Pred: {p:.2f}<br>Error: {e:.2f}" 
-                          for a, p, e in zip(y_test, y_pred, errors)],
-                    hoverinfo='text',
+                    labels={'x': 'Actual', 'y': 'Predicted'},
+                    title='Regression: Actual vs Predicted'
+                )
+                # Perfect prediction reference line
+                min_val = min(y_test.min(), y_pred.min()) if len(y_test) > 0 else 0
+                max_val = max(y_test.max(), y_pred.max()) if len(y_test) > 0 else 1
+                
+                # Add the 45-degree line for perfect prediction
+                fig3.add_trace(go.Scatter(
+                    x=[min_val, max_val],
+                    y=[min_val, max_val],
+                    mode='lines',
+                    line=dict(color='red', dash='dash'),
                     name='Perfect Prediction'
                 ))
-                
-                fig3.update_layout(
-                    title='Actual vs Predicted Values',
-                    xaxis_title='Actual',
-                    yaxis_title='Predicted',
-                    showlegend=True
-                )
-                
                 st.plotly_chart(fig3, use_container_width=True)
-                
-                # Error distribution
-                fig4 = px.histogram(
-                    x=errors,
-                    nbins=30,
-                    labels={'x': 'Absolute Error'},
-                    title='Prediction Error Distribution'
+            
+                # Residuals Plot
+                residuals = y_test - y_pred
+                fig4 = px.scatter(
+                    x=y_pred,
+                    y=residuals,
+                    labels={'x': 'Predicted', 'y': 'Residuals'},
+                    title='Residual Plot'
                 )
+                fig4.add_hline(y=0, line_dash="dash", line_color="red")
                 st.plotly_chart(fig4, use_container_width=True)
     
     except Exception as e:
@@ -1323,16 +1473,16 @@ elif S["page"] == "unsupervised":
     
     df = S["df"].copy()
     
-    # Encode categorical columns
+    # Pre-process data for unsupervised learning (impute and encode everything)
     try:
         df_encoded, _ = safe_label_encode(df)
     except Exception as e:
         st.error(f"❌ Encoding failed: {str(e)}")
         st.stop()
     
-    # Handle missing values
+    # Handle remaining missing values (should be numerical by now)
     if df_encoded.isnull().any().any():
-        st.warning("⚠️ Missing values detected. Filling with mean/mode...")
+        st.info("⚠️ Missing numerical values detected. Filling with mean/mode for analysis...")
         for col in df_encoded.columns:
             if df_encoded[col].dtype in [np.float64, np.int64]:
                 df_encoded[col].fillna(df_encoded[col].mean(), inplace=True)
@@ -1350,7 +1500,7 @@ elif S["page"] == "unsupervised":
         "PCA": "Dimensionality reduction. Finds principal components."
     }
     
-    algo = st.selectbox("Choose Algorithm", list(algorithms.keys()))
+    algo = st.selectbox("Choose Algorithm", list(algorithms.keys()), key="unsuper_algo_select")
     st.info(f"ℹ️ {algorithms[algo]}")
     
     # Algorithm-specific parameters
@@ -1360,12 +1510,13 @@ elif S["page"] == "unsupervised":
     model = None
     
     try:
+        # --- KMeans ---
         if algo == "KMeans":
             col1, col2 = st.columns(2)
             with col1:
-                n_clusters = st.slider("Number of Clusters (k)", 2, 15, 4)
+                n_clusters = st.slider("Number of Clusters (k)", 2, 15, 4, key="km_n_clusters")
             with col2:
-                n_init = st.slider("Number of Initializations", 5, 30, 10)
+                n_init = st.slider("Number of Initializations", 5, 30, 10, key="km_n_init")
             
             if st.button("🚀 Run KMeans", type="primary"):
                 with st.spinner("Running KMeans..."):
@@ -1373,19 +1524,20 @@ elif S["page"] == "unsupervised":
                     labels = model.fit_predict(df_encoded)
                     
                     # Calculate silhouette score
-                    if len(set(labels)) > 1:
+                    if len(set(labels)) > 1 and len(df_encoded) > n_clusters:
                         sil_score = silhouette_score(df_encoded, labels)
-                        st.success(f"✅ Clustering complete! Silhouette Score: {sil_score:.4f}")
+                        st.success(f"✅ Clustering complete! Silhouette Score: **{sil_score:.4f}**")
                         st.caption("📊 Silhouette Score ranges from -1 to 1. Higher is better.")
                     else:
-                        st.warning("⚠️ Only one cluster found")
+                        st.warning("⚠️ Only one cluster or too few samples found for silhouette score.")
         
+        # --- DBSCAN ---
         elif algo == "DBSCAN":
             col1, col2 = st.columns(2)
             with col1:
-                eps = st.slider("Epsilon (neighborhood radius)", 0.1, 10.0, 0.5, 0.1)
+                eps = st.slider("Epsilon (neighborhood radius)", 0.1, 10.0, 0.5, 0.1, key="db_eps")
             with col2:
-                min_samples = st.slider("Min Samples", 2, 20, 5)
+                min_samples = st.slider("Min Samples", 2, 20, 5, key="db_min_samples")
             
             if st.button("🚀 Run DBSCAN", type="primary"):
                 with st.spinner("Running DBSCAN..."):
@@ -1395,35 +1547,37 @@ elif S["page"] == "unsupervised":
                     n_clusters = len(set(labels)) - (1 if -1 in labels else 0)
                     n_noise = list(labels).count(-1)
                     
-                    st.success(f"✅ Found {n_clusters} clusters and {n_noise} noise points")
-        
+                    st.success(f"✅ Found **{n_clusters}** clusters and **{n_noise}** noise points")
+
+        # --- Agglomerative ---
         elif algo == "Agglomerative":
             col1, col2 = st.columns(2)
             with col1:
-                n_clusters = st.slider("Number of Clusters", 2, 15, 4)
+                n_clusters = st.slider("Number of Clusters", 2, 15, 4, key="agg_n_clusters")
             with col2:
-                linkage = st.selectbox("Linkage", ["ward", "complete", "average", "single"])
+                linkage = st.selectbox("Linkage", ["ward", "complete", "average", "single"], key="agg_linkage")
             
             if st.button("🚀 Run Agglomerative", type="primary"):
                 with st.spinner("Running Agglomerative Clustering..."):
                     model = AgglomerativeClustering(n_clusters=n_clusters, linkage=linkage)
                     labels = model.fit_predict(df_encoded)
-                    st.success(f"✅ Clustering complete! Found {n_clusters} clusters")
+                    st.success(f"✅ Clustering complete! Found **{n_clusters}** clusters")
         
+        # --- GaussianMixture ---
         elif algo == "GaussianMixture":
             col1, col2 = st.columns(2)
             with col1:
-                n_components = st.slider("Number of Components", 2, 15, 4)
+                n_components = st.slider("Number of Components", 2, 15, 4, key="gm_n_components")
             with col2:
-                covariance_type = st.selectbox("Covariance Type", 
-                                               ["full", "tied", "diag", "spherical"])
+                covariance_type = st.selectbox("Covariance Type", ["full", "tied", "diag", "spherical"], key="gm_cov_type")
             
             if st.button("🚀 Run Gaussian Mixture", type="primary"):
                 with st.spinner("Running Gaussian Mixture Model..."):
                     model = GaussianMixture(n_components=n_components, 
-                                          covariance_type=covariance_type,
-                                          random_state=42)
-                    labels = model.fit_predict(df_encoded)
+                                             covariance_type=covariance_type,
+                                             random_state=42)
+                    model.fit(df_encoded)
+                    labels = model.predict(df_encoded) # Predict components
                     
                     bic = model.bic(df_encoded)
                     aic = model.aic(df_encoded)
@@ -1435,28 +1589,30 @@ elif S["page"] == "unsupervised":
                     with col_b:
                         st.metric("AIC", f"{aic:.2f}", help="Lower is better")
         
+        # --- IsolationForest (Anomaly Detection) ---
         elif algo == "IsolationForest":
             col1, col2 = st.columns(2)
             with col1:
-                contamination = st.slider("Contamination (outlier %)", 0.01, 0.5, 0.1, 0.01)
+                contamination = st.slider("Contamination (outlier %)", 0.01, 0.5, 0.1, 0.01, key="if_contamination")
             with col2:
-                n_estimators = st.slider("Number of Trees", 50, 300, 100, 50)
+                n_estimators = st.slider("Number of Trees", 50, 300, 100, 50, key="if_n_estimators")
             
             if st.button("🚀 Run Isolation Forest", type="primary"):
                 with st.spinner("Running Isolation Forest..."):
                     model = IsolationForest(contamination=contamination,
-                                          n_estimators=n_estimators,
-                                          random_state=42)
+                                             n_estimators=n_estimators,
+                                             random_state=42)
                     labels = model.fit_predict(df_encoded)
                     
                     # Convert to 0/1 (inliers/outliers)
-                    labels = np.where(labels == 1, 0, 1)
+                    labels = np.where(labels == 1, 0, 1) # 1 = outlier
                     
                     n_outliers = sum(labels)
-                    st.success(f"✅ Detection complete! Found {n_outliers} outliers ({n_outliers/len(labels)*100:.1f}%)")
+                    st.success(f"✅ Detection complete! Found **{n_outliers}** outliers (**{n_outliers/len(labels)*100:.1f}%**)")
         
-        else:  # PCA
-            n_components = st.slider("Number of Components", 2, min(10, df_encoded.shape[1]), 2)
+        # --- PCA ---
+        elif algo == "PCA":
+            n_components = st.slider("Number of Components", 2, min(10, df_encoded.shape[1]), 2, key="pca_n_components")
             
             if st.button("🚀 Run PCA", type="primary"):
                 with st.spinner("Running PCA..."):
@@ -1475,8 +1631,8 @@ elif S["page"] == "unsupervised":
                         st.markdown("#### 📊 Explained Variance")
                         var_df = pd.DataFrame({
                             'Component': [f'PC{i+1}' for i in range(n_components)],
-                            'Variance': explained_var,
-                            'Cumulative': cumulative_var
+                            'Variance': [f'{v:.4f}' for v in explained_var],
+                            'Cumulative': [f'{v:.4f}' for v in cumulative_var]
                         })
                         st.dataframe(var_df, use_container_width=True)
                     
@@ -1499,21 +1655,22 @@ elif S["page"] == "unsupervised":
                         )
                         st.plotly_chart(fig_pca, use_container_width=True)
                     
-                    st.stop()
+                    st.stop() # Stop here to show PCA results
         
         # Visualization (for clustering/anomaly detection)
         if labels is not None:
             st.markdown("### 📊 Visualization")
             
-            # PCA for 2D projection
-            if df_encoded.shape[1] > 2:
+            # PCA for 2D projection (if needed)
+            X_data = df_encoded.values
+            if X_data.shape[1] > 2:
                 pca = PCA(n_components=2)
-                X_2d = pca.fit_transform(df_encoded)
+                X_2d = pca.fit_transform(X_data)
                 explained = pca.explained_variance_ratio_
-                st.caption(f"PCA: {explained[0]*100:.1f}% + {explained[1]*100:.1f}% = {sum(explained)*100:.1f}% variance")
+                st.caption(f"PCA: {explained[0]*100:.1f}% + {explained[1]*100:.1f}% = {sum(explained)*100:.1f}% variance explained")
             else:
-                X_2d = df_encoded.values
-            
+                X_2d = X_data
+                
             # Create visualization
             fig = px.scatter(
                 x=X_2d[:, 0],
@@ -1527,12 +1684,17 @@ elif S["page"] == "unsupervised":
             st.plotly_chart(fig, use_container_width=True)
             
             # Cluster statistics
-            st.markdown("#### 📈 Cluster Statistics")
+            st.markdown("#### 📈 Cluster/Group Statistics")
             
             cluster_df = df.copy()
-            cluster_df['Cluster'] = labels
-            
-            cluster_summary = cluster_df.groupby('Cluster').size().reset_index(name='Count')
+            if algo == "IsolationForest":
+                cluster_df['Group'] = np.where(labels == 1, 'Outlier', 'Inlier')
+                summary_col = 'Group'
+            else:
+                cluster_df['Cluster'] = labels
+                summary_col = 'Cluster'
+                
+            cluster_summary = cluster_df.groupby(summary_col).size().reset_index(name='Count')
             cluster_summary['Percentage'] = cluster_summary['Count'] / len(cluster_df) * 100
             
             st.dataframe(cluster_summary, use_container_width=True)
@@ -1541,9 +1703,9 @@ elif S["page"] == "unsupervised":
             S["unsup_labels"] = labels
             
             # Download option
-            if st.button("💾 Add Cluster Labels to Dataset"):
-                S["df"]['Cluster'] = labels
-                st.success("✅ Cluster labels added to dataset as 'Cluster' column")
+            if st.button("💾 Add Labels to Dataset"):
+                S["df"][summary_col] = labels
+                st.success(f"✅ Labels added to dataset as '{summary_col}' column")
     
     except Exception as e:
         st.error(f"❌ Algorithm failed: {str(e)}")
@@ -1606,7 +1768,13 @@ elif S["page"] == "results":
                 </div>
             </div>
             """, unsafe_allow_html=True)
-    
+        
+        if 'classification_report' in results:
+             with st.expander("📋 Detailed Classification Report"):
+                 # Pretty print the classification report
+                 report_str = json.dumps(results['classification_report'], indent=4)
+                 st.code(report_str, language='json')
+        
     else:  # Regression
         col1, col2, col3, col4 = st.columns(4)
         
@@ -1703,258 +1871,76 @@ elif S["page"] == "help":
     st.markdown("""
     ## 🚀 Quick Start Guide
     
-    ### 1. Upload Data (Dashboard)
-    - Upload a CSV file
-    - Preview your data and check for missing values
-    - Configure email for receiving results
+    ### 1. Upload Data (**Dashboard**)
+    - Upload a **CSV** file.
+    - Preview your data and check for missing values.
     
-    ### 2. Preprocess (Preprocessing)
-    - Handle missing values (imputation or removal)
-    - Remove outliers using IQR method
-    - Encode categorical variables
-    - Scale numerical features
-    - Select important features
+    ### 2. Preprocess (**Preprocess**)
+    - Handle **missing values** (imputation or removal).
+    - Remove **outliers** using the IQR method.
+    - Encode **categorical variables** (One-Hot or Label).
+    - Scale **numerical features** (Standard, MinMax, etc.). *Important for distance-based models like SVM, KNN, and Neural Networks.*
     
-    ### 3. Train Model (Train)
-    - Select target variable
-    - Choose task type (Classification/Regression)
-    - Create derived features if needed
-    - Select and configure model
-    - Train and evaluate
+    ### 3. Train Model (**Train (Supervised)**)
+    - Select your **target variable** and confirm **Task Type** (Classification/Regression).
+    - Optionally create **derived features** in Feature Engineering.
+    - Select and tune **Hyperparameters** for your chosen model.
+    - Click **Train Model** to run evaluation.
     
-    ### 4. Visualize (Playground)
-    - View decision boundaries (classification)
-    - Analyze predictions (regression)
-    - Understand model behavior
-    
-    ### 5. Unsupervised Learning
-    - Clustering (KMeans, DBSCAN, etc.)
-    - Anomaly detection (Isolation Forest)
-    - Dimensionality reduction (PCA)
+    ### 4. Other Labs
+    - **Playground**: Visualize model decision boundaries or regression performance.
+    - **Unsupervised**: Run clustering (KMeans, DBSCAN) or dimensionality reduction (PCA).
+    - **Results**: See detailed metrics and download/email the report.
     
     ---
     
-    ## 🤖 Model Selection Guide
+    ## 🤖 Model Selection Guide (Summary)
     
-    ### Classification Models
-    
-    **Logistic Regression**
-    - ✅ Fast, interpretable, good baseline
-    - ✅ Works well with linearly separable data
-    - ❌ Limited with complex patterns
-    - 📊 Best for: Binary/multiclass with linear boundaries
-    
-    **Random Forest**
-    - ✅ Handles non-linear patterns excellently
-    - ✅ Robust to overfitting
-    - ✅ Works with mixed feature types
-    - ❌ Can be slow on large datasets
-    - 📊 Best for: Most classification tasks
-    
-    **Gradient Boosting / XGBoost**
-    - ✅ Often achieves highest accuracy
-    - ✅ Handles imbalanced data well
-    - ❌ Requires careful tuning
-    - 📊 Best for: When you need maximum performance
-    
-    **SVM (Support Vector Machine)**
-    - ✅ Effective in high dimensions
-    - ✅ Good with clear margins
-    - ❌ Slow on large datasets
-    - 📊 Best for: Medium-sized datasets with clear separation
-    
-    **K-Nearest Neighbors**
-    - ✅ Simple and intuitive
-    - ✅ No training phase
-    - ❌ Slow predictions on large data
-    - 📊 Best for: Small datasets with local patterns
-    
-    **Neural Network (MLP)**
-    - ✅ Can model very complex patterns
-    - ✅ Flexible architecture
-    - ❌ Needs more data
-    - ❌ Requires careful tuning
-    - 📊 Best for: Large datasets with complex patterns
-    
-    ### Regression Models
-    
-    **Linear Regression**
-    - ✅ Fast and interpretable
-    - ✅ Good baseline
-    - ❌ Assumes linear relationships
-    - 📊 Best for: Linear relationships
-    
-    **Ridge / Lasso / ElasticNet**
-    - ✅ Regularized versions prevent overfitting
-    - ✅ Lasso can select features
-    - 📊 Best for: High-dimensional data with collinearity
-    
-    **Random Forest Regressor**
-    - ✅ Handles non-linearity
-    - ✅ Robust and accurate
-    - 📊 Best for: Most regression tasks
-    
-    **Gradient Boosting Regressor**
-    - ✅ Often highest accuracy
-    - ✅ Handles complex patterns
-    - 📊 Best for: When you need best performance
+    | Task | Model | Best For | Tip/Note |
+    | :--- | :--- | :--- | :--- |
+    | **Classification** | **Random Forest** | General purpose, non-linear data | Good default choice. |
+    | | **XGBoost/GBM** | Maximum accuracy, production models | Requires careful tuning. |
+    | | **Logistic Regression** | Baseline, interpretable models | Assumes linear separability. |
+    | **Regression** | **Random Forest** | General purpose, robust | Excellent for most tasks. |
+    | | **XGBoost/GBM** | Max accuracy for non-linear patterns | Highly effective but complex. |
+    | | **Linear Regression** | Simple baseline, linear data | Add Ridge/Lasso for regularization. |
     
     ---
     
     ## 🧹 Preprocessing Best Practices
     
-    ### Missing Values
-    - **Mean/Median**: For numerical features
-    - **Most Frequent**: For categorical features
-    - **Drop Rows**: When < 5% of data is missing
+    ### Scaling Decision
+    - **StandardScaler**: Recommended for SVM, Neural Networks, KNN.
+    - **None**: Recommended for tree-based models (RF, GB, Decision Trees) as they are scale-invariant.
     
-    ### Encoding
-    - **One-Hot**: For tree-based models (RF, GB)
-    - **Label**: For linear models, faster processing
-    
-    ### Scaling
-    - **StandardScaler**: For SVM, Neural Networks, KNN
-    - **MinMaxScaler**: When you need [0, 1] range
-    - **RobustScaler**: When you have outliers
-    - **None**: For tree-based models (RF, GB, Decision Trees)
-    
-    ### Feature Selection
-    - Remove features with variance < 0.01
-    - Use correlation analysis to find redundant features
-    - Create domain-specific derived features
+    ### Encoding Decision
+    - **One-Hot Encoding**: Safer for most models, especially linear models. Can lead to many features.
+    - **Label Encoding**: Only for ordinal features or as a quick-fix for non-tree models.
     
     ---
     
-    ## 📊 Metrics Explained
+    ## 🔒 Security & Privacy Notes
     
-    ### Classification
-    - **Accuracy**: % of correct predictions (good for balanced classes)
-    - **F1 Score**: Harmonic mean of precision and recall (good for imbalanced)
-    - **Confusion Matrix**: Shows true positives, false positives, etc.
-    
-    ### Regression
-    - **RMSE**: Root Mean Squared Error (penalizes large errors)
-    - **MAE**: Mean Absolute Error (average error magnitude)
-    - **R² Score**: Proportion of variance explained (0-1, higher better)
-    
-    ---
-    
-    ## 🔒 Security & Privacy
-    
-    ### Email Configuration
-    - ⚠️ **Never commit credentials to code**
-    - Use environment variables or Streamlit secrets
-    - Generate App Passwords for Gmail (not your main password)
-    - Email feature is disabled by default for safety
-    
-    ### Data Privacy
-    - All processing happens locally
-    - No data is sent to external servers (except email)
-    - Your data stays in your session
-    
-    ---
-    
-    ## 🐛 Troubleshooting
-    
-    ### Common Issues
-    
-    **"Training failed" Error**
-    - Check for missing values in target variable
-    - Ensure sufficient data (>10 rows minimum)
-    - Try different encoding methods
-    - Check for class imbalance (use SMOTE)
-    
-    **"Email failed" Error**
-    - Verify email credentials are configured
-    - Enable "Less secure app access" or use App Password
-    - Check internet connection
-    
-    **Poor Model Performance**
-    - Try different preprocessing steps
-    - Tune hyperparameters
-    - Try different models
-    - Check for data leakage
-    - Add more features or data
-    
-    **Memory Issues**
-    - Reduce dataset size
-    - Use simpler models
-    - Reduce number of estimators in ensemble methods
-    
-    ---
-    
-    ## 📚 Additional Resources
-    
-    - [Scikit-learn Documentation](https://scikit-learn.org/)
-    - [XGBoost Guide](https://xgboost.readthedocs.io/)
-    - [Machine Learning Mastery](https://machinelearningmastery.com/)
-    
-    ---
-    
-    ## 💡 Tips & Tricks
-    
-    1. **Always start simple**: Try Linear/Logistic Regression first
-    2. **Visualize your data**: Use the EDA report to understand patterns
-    3. **Feature engineering matters**: Often more important than model choice
-    4. **Cross-validation**: Consider implementing for robust evaluation
-    5. **Save your work**: Download results and models regularly
-    6. **Iterate**: ML is iterative - try, evaluate, improve
+    - **Email Credentials**: Never hardcode. Use the app's internal mechanism for safety (even here they are placeholders).
+    - **Data Processing**: All data processing is done locally within your browser/Streamlit session. No data leaves the application unless you manually click **Send Email**.
     
     ---
     
     ### Need More Help?
     
-    - Review the preprocessing steps carefully
-    - Check the error details in expandable sections
-    - Try simpler models first to isolate issues
-    - Ensure data quality before training
+    - Review the preprocessing steps carefully.
+    - Check the error details in expandable sections.
+    - Try simpler models first to isolate issues.
     
     **Version**: 2.0 (Secure & Enhanced)
     """)
 
-# ===================== PLAYGROUND REGRESSION VISUALIZATION (Fixed Ending) =====================
-                # Actual vs Predicted Scatter
-                fig3 = px.scatter(
-                    x=y_test,
-                    y=y_pred,
-                    labels={'x': 'Actual', 'y': 'Predicted'},
-                    title='Regression: Actual vs Predicted'
-                )
-                # Perfect prediction reference line
-                min_val, max_val = float(min(y_test.min(), y_pred.min())), float(max(y_test.max(), y_pred.max()))
-                fig3.add_trace(go.Scatter(
-                    x=[min_val, max_val],
-                    y=[min_val, max_val],
-                    mode='lines',
-                    line=dict(color='red', dash='dash'),
-                    name='Perfect Prediction'
-                ))
-                st.plotly_chart(fig3, use_container_width=True)
-
-                # Residuals Plot
-                residuals = y_test - y_pred
-                fig4 = px.scatter(
-                    x=y_pred,
-                    y=residuals,
-                    labels={'x': 'Predicted', 'y': 'Residuals'},
-                    title='Residual Plot'
-                )
-                fig4.add_hline(y=0, line_dash="dash", line_color="red")
-                st.plotly_chart(fig4, use_container_width=True)
-
-    except Exception as e:
-        st.error(f"❌ Playground visualization failed: {str(e)}")
-        import traceback
-        with st.expander("🔍 Error Details"):
-            st.code(traceback.format_exc())
-
 # ===================== FOOTER =====================
 st.markdown("---")
 st.markdown("""
-<div style='text-align:center;color:#6b7280;font-size:0.85rem;padding:20px'>
+<div style='text-align:center;color:#6b7280;font-size:0.85rem;padding-bottom:10px;'>
     <strong>AutoMLPilot Pro</strong> | Secure No-Code ML Platform<br>
     Built with Streamlit, Scikit-learn, Plotly, and ❤️<br>
-    <em>Remember to configure email credentials before enabling email features</em><br><br>
     <span style='font-size:0.75rem;color:#94a3b8;'>Version 2.0 — Secure & Enhanced Edition</span>
 </div>
 """, unsafe_allow_html=True)
