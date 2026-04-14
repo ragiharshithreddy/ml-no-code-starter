@@ -10,3 +10,6 @@ scikit-learn
 xgboost
 seaborn
 kaleido
+pycaret
+transformers
+torch
