@@ -44,12 +44,13 @@ import joblib
 try:
     from transformers import pipeline
     TRANSFORMERS_OK = True
+    @st.cache_resource
+    def get_ai_pipeline():
+        return pipeline('text-generation', model='distilgpt2')
 except Exception:
     TRANSFORMERS_OK = False
-
-@st.cache_resource
-def get_ai_pipeline():
-    return pipeline('text-generation', model='distilgpt2')
+    def get_ai_pipeline():
+        return None
 
 # Optional libraries
 try:
@@ -93,10 +94,10 @@ from email.mime.multipart import MIMEMultipart
 # password = "your-app-password"
 
 ENABLE_EMAIL = True
-OWNER_GMAIL = st.secrets.get("email", {}).get("address", "")
-OWNER_APP_PASSWORD = st.secrets.get("email", {}).get("password", "")
-OWNER_ALIAS = "noreply@automlpilot.com"
-SENDER_NAME = "AutoMLPilot"
+OWNER_GMAIL = st.secrets.get("SMTP_SENDER_EMAIL", "")
+OWNER_APP_PASSWORD = st.secrets.get("SMTP_APP_PASSWORD", "")
+OWNER_ALIAS = st.secrets.get("SMTP_SENDER_ALIAS", "noreply@automlpilot.com")
+SENDER_NAME = st.secrets.get("SMTP_SENDER_NAME", "AutoMLPilot")
 
 # Check if email is properly configured
 if ENABLE_EMAIL and (not OWNER_GMAIL or not OWNER_APP_PASSWORD):
@@ -397,6 +398,7 @@ if "S" not in st.session_state:
         "scaler": None,
         "scaler_name": None,
         "results": {},
+        "leaderboard": [],
         "unsup_labels": None,
         "preprocessing_steps": [],
     }
@@ -538,24 +540,66 @@ if S["page"] == "dashboard":
     
     # AI Insights Section
     if S["df"] is not None and TRANSFORMERS_OK:
-        st.markdown("### ✨ AI Smart Insights")
-        if st.button("🤖 Generate AI Analysis"):
-            with st.spinner("AI is analyzing your data..."):
+        st.markdown("### ✨ AI Revolution: Smart Insights & Lab")
+        ai_col1, ai_col2 = st.columns(2)
+
+        with ai_col1:
+            if st.button("🤖 Generate Data Insights", use_container_width=True):
+                with st.spinner("AI is analyzing your data..."):
+                    try:
+                        # Summarize data for AI
+                        num_cols = S["df"].select_dtypes(include=[np.number]).columns.tolist()
+                        cat_cols = S["df"].select_dtypes(exclude=[np.number]).columns.tolist()
+                        summary_stats = S["df"].describe().to_string()
+
+                        prompt = (
+                            f"Context: Data Analysis. Dataset has numeric columns: {num_cols} and categorical: {cat_cols}.\n"
+                            f"Summary Statistics:\n{summary_stats}\n\n"
+                            f"Task: Provide 3 professional data science insights about this dataset. Focus on distributions, potential correlations, and data quality."
+                        )
+
+                        generator = get_ai_pipeline()
+                        insights = generator(prompt, max_length=400, num_return_sequences=1)[0]['generated_text']
+
+                        st.markdown("<div class='success-box'>", unsafe_allow_html=True)
+                        st.write(insights.replace(prompt, "").strip())
+                        st.markdown("</div>", unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"❌ AI analysis failed: {str(e)}")
+
+        with ai_col2:
+            if st.button("🪄 AI Preprocessing Suggestions", use_container_width=True):
+                with st.spinner("AI is thinking..."):
+                    try:
+                        missing = S["df"].isnull().sum().to_dict()
+                        skewed = S["df"].select_dtypes(include=[np.number]).skew().to_dict()
+
+                        prompt = (
+                            f"Data Profile: Missing values: {missing}. Skewness: {skewed}.\n"
+                            f"Task: Suggest 3 specific preprocessing steps (scaling, encoding, or imputation) to optimize machine learning performance."
+                        )
+
+                        generator = get_ai_pipeline()
+                        suggestions = generator(prompt, max_length=300, num_return_sequences=1)[0]['generated_text']
+
+                        st.markdown("<div class='info-box' style='background:#e0f2fe; border-left:4px solid #0284c7; padding:12px; border-radius:8px;'>", unsafe_allow_html=True)
+                        st.write(suggestions.replace(prompt, "").strip())
+                        st.markdown("</div>", unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"❌ AI suggestions failed: {str(e)}")
+
+        st.markdown("#### 💬 Chat with your Data")
+        user_query = st.text_input("Ask AI a question about your dataset:", placeholder="e.g., Which column seems most important for prediction?")
+        if user_query:
+            with st.spinner("AI is thinking..."):
                 try:
-                    # Summarize data for AI
-                    summary_stats = S["df"].describe().to_string()
-                    cols = ", ".join(S["df"].columns)
-                    prompt = f"Dataset has columns: {cols}. Summary stats: {summary_stats}. provide 3 key insights about this data."
-
-                    # Initialize generator (lightweight)
+                    summary = S["df"].describe(include='all').to_string()[:1000] # Truncate for prompt
+                    prompt = f"Dataset Summary:\n{summary}\n\nUser Question: {user_query}\n\nExpert Answer:"
                     generator = get_ai_pipeline()
-                    insights = generator(prompt, max_length=200, num_return_sequences=1)[0]['generated_text']
-
-                    st.markdown("<div class='success-box'>", unsafe_allow_html=True)
-                    st.write(insights.replace(prompt, "").strip())
-                    st.markdown("</div>", unsafe_allow_html=True)
+                    answer = generator(prompt, max_length=200, num_return_sequences=1)[0]['generated_text']
+                    st.info(answer.replace(prompt, "").strip())
                 except Exception as e:
-                    st.error(f"❌ AI analysis failed: {str(e)}")
+                    st.error(f"❌ AI Chat failed: {str(e)}")
 
     # EDA Section
     if S["df"] is not None:
@@ -766,15 +810,28 @@ elif S["page"] == "preprocess":
     
     # Apply preprocessing
     st.markdown("---")
-    if st.button("💾 Apply Preprocessing", type="primary"):
-        # Drop rows that may have NaNs after previous steps (e.g., division by zero)
-        df = df.dropna().reset_index(drop=True)
-        
-        S["df"] = df
-        S["preprocessing_steps"].extend(steps_applied)
-        st.success(f"✅ Applied **{len(steps_applied)}** preprocessing steps. Dataset size: {df.shape[0]} rows.")
-        st.info("Move to Train tab to build models")
-        st.rerun() # Rerun to update the dataframe info in the sidebar and ensure clean session state
+    pre_col1, pre_col2 = st.columns(2)
+    with pre_col1:
+        if st.button("💾 Apply Preprocessing", type="primary", use_container_width=True):
+            # Drop rows that may have NaNs after previous steps (e.g., division by zero)
+            df = df.dropna().reset_index(drop=True)
+
+            S["df"] = df
+            S["preprocessing_steps"].extend(steps_applied)
+            st.success(f"✅ Applied **{len(steps_applied)}** preprocessing steps. Dataset size: {df.shape[0]} rows.")
+            st.info("Move to Train tab to build models")
+            st.rerun() # Rerun to update the dataframe info in the sidebar and ensure clean session state
+
+    with pre_col2:
+        if S["df"] is not None:
+            csv = S["df"].to_csv(index=False).encode('utf-8')
+            st.download_button(
+                label="📥 Download Processed Data (CSV)",
+                data=csv,
+                file_name="processed_data.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
     
     # Show current preprocessing steps
     if S["preprocessing_steps"]:
@@ -870,7 +927,24 @@ elif S["page"] == "train":
                     file_name="automlpilot_training.ipynb",
                     mime="application/x-ipynb+json"
                 )
-                st.success("✅ Notebook generated! Download it and upload to Google Colab.")
+
+                st.markdown("#### 💻 Quick Code Snippet")
+                code_snippet = f"""
+import pandas as pd
+from pycaret.{S['task'].lower()} import *
+
+# Load your dataset
+df = pd.read_csv('your_dataset.csv')
+
+# Setup and Compare
+s = setup(data=df, target='{S['target']}', session_id=123)
+best_model = compare_models()
+
+# Save model
+save_model(best_model, 'best_model')
+"""
+                st.code(code_snippet, language='python')
+                st.success("✅ Notebook generated! Download it or copy the code above.")
             except Exception as e:
                 st.error(f"❌ Notebook generation failed: {str(e)}")
 
@@ -1279,6 +1353,16 @@ elif S["page"] == "train":
                     S["task"] = task
                     S["final_cols"] = [c for c in df.columns if c != S["target"]]
 
+                    # Update Leaderboard
+                    leaderboard_entry = {
+                        "Model": f"{results['model']} (AutoML)",
+                        "Time (s)": "N/A",
+                        "Accuracy/R2": results.get("accuracy") if task == "Classification" else results.get("r2_score"),
+                        "F1/RMSE": results.get("f1_score") if task == "Classification" else results.get("rmse")
+                    }
+                    if "leaderboard" not in S: S["leaderboard"] = []
+                    S["leaderboard"].append(leaderboard_entry)
+
                     st.success(f"✅ AutoML found the best model: **{results['model']}**")
                     st.dataframe(results_df, use_container_width=True)
                     st.stop() # Early stop as we've already done everything
@@ -1358,6 +1442,19 @@ elif S["page"] == "train":
                     with col3:
                         st.metric("Training Time", f"{training_time:.2f}s")
                     
+                    # Feature Importance
+                    if hasattr(model, 'feature_importances_'):
+                        st.markdown("#### ⚡ Feature Importance")
+                        feat_imp = pd.DataFrame({
+                            'Feature': X.columns,
+                            'Importance': model.feature_importances_
+                        }).sort_values(by='Importance', ascending=False).head(10)
+
+                        fig_imp = px.bar(feat_imp, x='Importance', y='Feature', orientation='h',
+                                       title='Top 10 Feature Importances',
+                                       color='Importance', color_continuous_scale='Viridis')
+                        st.plotly_chart(fig_imp, use_container_width=True)
+
                     # Confusion Matrix
                     st.markdown("#### Confusion Matrix")
                     cm = confusion_matrix(y_test, y_pred)
@@ -1400,6 +1497,19 @@ elif S["page"] == "train":
                     with col4:
                         st.metric("Training Time", f"{training_time:.2f}s")
                     
+                    # Feature Importance
+                    if hasattr(model, 'feature_importances_'):
+                        st.markdown("#### ⚡ Feature Importance")
+                        feat_imp = pd.DataFrame({
+                            'Feature': X.columns,
+                            'Importance': model.feature_importances_
+                        }).sort_values(by='Importance', ascending=False).head(10)
+
+                        fig_imp = px.bar(feat_imp, x='Importance', y='Feature', orientation='h',
+                                       title='Top 10 Feature Importances',
+                                       color='Importance', color_continuous_scale='Viridis')
+                        st.plotly_chart(fig_imp, use_container_width=True)
+
                     # Actual vs Predicted
                     st.markdown("#### Actual vs Predicted")
                     fig = px.scatter(
@@ -1434,6 +1544,16 @@ elif S["page"] == "train":
                 S["results"] = results
                 S["task"] = task
                 
+                # Update Leaderboard
+                leaderboard_entry = {
+                    "Model": results["model"],
+                        "Time (s)": results.get("training_time_sec", 0),
+                    "Accuracy/R2": results.get("accuracy") if task == "Classification" else results.get("r2_score"),
+                    "F1/RMSE": results.get("f1_score") if task == "Classification" else results.get("rmse")
+                }
+                if "leaderboard" not in S: S["leaderboard"] = []
+                S["leaderboard"].append(leaderboard_entry)
+
                 st.success("✅ Training completed successfully! Check the **Playground** or **Results** tab.")
                 
         except Exception as e:
@@ -1867,6 +1987,13 @@ elif S["page"] == "results":
         st.info("📈 Train a model to see results here")
         st.stop()
     
+    # Model Leaderboard
+    if S.get("leaderboard"):
+        st.markdown("### 🏆 Session Leaderboard")
+        l_df = pd.DataFrame(S["leaderboard"])
+        st.dataframe(l_df.sort_values(by="Accuracy/R2", ascending=False), use_container_width=True)
+        st.markdown("---")
+
     st.markdown("### 🎯 Training Summary")
     
     results = S["results"]
@@ -2000,15 +2127,35 @@ elif S["page"] == "results":
     
     # Download results
     st.markdown("---")
-    st.markdown("### 💾 Download Results")
+    st.markdown("### 💾 Download & Export")
     
-    results_json = json.dumps(results, indent=2)
-    st.download_button(
-        label="📥 Download as JSON",
-        data=results_json,
-        file_name=f"automl_results_{results.get('model', 'model')}.json",
-        mime="application/json"
-    )
+    down_col1, down_col2 = st.columns(2)
+    with down_col1:
+        results_json = json.dumps(results, indent=2)
+        st.download_button(
+            label="📥 Download Metrics (JSON)",
+            data=results_json,
+            file_name=f"automl_results_{results.get('model', 'model')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+    with down_col2:
+        if S["model"] is not None:
+            try:
+                # Save model to a byte buffer
+                import io
+                buffer = io.BytesIO()
+                joblib.dump(S["model"], buffer)
+                st.download_button(
+                    label="📥 Download Trained Model (.pkl)",
+                    data=buffer.getvalue(),
+                    file_name=f"model_{results.get('model', 'model')}.pkl",
+                    mime="application/octet-stream",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.error(f"❌ Model export failed: {str(e)}")
 
 # ===================== DEPLOYMENT =====================
 elif S["page"] == "deployment":
@@ -2065,9 +2212,21 @@ elif S["page"] == "deployment":
                         val = st.number_input(f"{feat}", value=0.0)
                     input_data[feat] = val
 
-            if st.button("✨ Predict"):
+            if st.button("✨ Predict", type="primary", use_container_width=True):
                 try:
                     input_df = pd.DataFrame([input_data])
+
+                    # Apply Label Encoders if available for current session
+                    if S.get("label_encoders"):
+                        for col, le in S["label_encoders"].items():
+                            if col in input_df.columns:
+                                try:
+                                    # Handle unseen labels by mapping them to first known class if necessary
+                                    # or just let it fail and catch
+                                    input_df[col] = le.transform(input_df[col].astype(str))
+                                except Exception:
+                                    st.warning(f"⚠️ Unseen value in {col}, using default encoding.")
+                                    input_df[col] = 0
                     # If it's a PyCaret model, we might need to use predict_model
                     if 'pycaret' in str(type(model)):
                         from pycaret.classification import predict_model as cls_pred
