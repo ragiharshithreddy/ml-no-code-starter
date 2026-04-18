@@ -49,7 +49,7 @@ except Exception:
 
 @st.cache_resource
 def get_ai_pipeline():
-    return pipeline('text-generation', model='distilgpt2')
+    return pipeline('text-generation', model='distilgpt2', device=-1)
 
 # Optional libraries
 try:
@@ -258,9 +258,12 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
 
             <div style='background:#f9fafb; padding:20px; border-radius:12px; margin-bottom:24px; border-left: 4px solid #7c3aed;'>
                 <h3 style='margin-top:0; color:#1f2937;'>📊 Model Summary</h3>
-                <p style='margin:4px 0;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
-                <p style='margin:4px 0;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
-                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task') == "Classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
+                <table style='width:100%; border-collapse: collapse;'>
+                    <tr><td style='padding:5px 0;'><strong>Model:</strong></td><td style='text-align:right;'>{results.get('model', 'N/A')}</td></tr>
+                    <tr><td style='padding:5px 0;'><strong>Task:</strong></td><td style='text-align:right;'>{results.get('task', 'N/A')}</td></tr>
+                    {f"<tr><td style='padding:5px 0;'><strong>Accuracy:</strong></td><td style='text-align:right;'>{results.get('accuracy', 0)*100:.2f}%</td></tr>" if results.get('task') == "Classification" else f"<tr><td style='padding:5px 0;'><strong>R² Score:</strong></td><td style='text-align:right;'>{results.get('r2_score', 0):.4f}</td></tr>"}
+                    {f"<tr><td style='padding:5px 0;'><strong>F1 Score:</strong></td><td style='text-align:right;'>{results.get('f1_score', 0):.4f}</td></tr>" if results.get('task') == "Classification" else f"<tr><td style='padding:5px 0;'><strong>RMSE:</strong></td><td style='text-align:right;'>{results.get('rmse', 0):.4f}</td></tr>"}
+                </table>
             </div>
 
             {extra_html}
@@ -399,8 +402,29 @@ if "S" not in st.session_state:
         "results": {},
         "unsup_labels": None,
         "preprocessing_steps": [],
+        "leaderboard": [],
+        "dark_mode": False,
     }
 S = st.session_state.S
+
+# Dark Mode Injection
+if S.get("dark_mode"):
+    st.markdown("""
+    <style>
+        :root {
+            --bg1: #1e1e2e;
+            --bg2: #181825;
+            --card: rgba(30, 30, 46, 0.8);
+            --border: rgba(255, 255, 255, 0.1);
+            --primary-color: #cba6f7;
+        }
+        .main { background: #11111b !important; }
+        h1, h2, h3, h4, p, span, div, label { color: #cdd6f4 !important; }
+        .stMetric { background: #181825 !important; border: 1px solid #313244 !important; }
+        .topbar { background: rgba(17, 17, 27, 0.9) !important; }
+        [data-testid="stSidebarContent"] { background: #11111b !important; }
+    </style>
+    """, unsafe_allow_html=True)
 
 # ===================== TOP BAR (FIXED) =====================
 with st.container():
@@ -424,6 +448,7 @@ with st.container():
 # ===================== SIDEBAR NAV (FIXED & BUTTON-STYLE) =====================
 with st.sidebar:
     st.subheader("🧭 Navigation")
+    S["dark_mode"] = st.toggle("🌙 Dark Mode", value=S.get("dark_mode", False))
     
     # Custom format_func and layout for button-style navigation
     nav_options = ["dashboard", "preprocess", "train", "playground", "unsupervised", "results", "deployment", "help"]
@@ -539,23 +564,46 @@ if S["page"] == "dashboard":
     # AI Insights Section
     if S["df"] is not None and TRANSFORMERS_OK:
         st.markdown("### ✨ AI Smart Insights")
-        if st.button("🤖 Generate AI Analysis"):
-            with st.spinner("AI is analyzing your data..."):
-                try:
-                    # Summarize data for AI
-                    summary_stats = S["df"].describe().to_string()
-                    cols = ", ".join(S["df"].columns)
-                    prompt = f"Dataset has columns: {cols}. Summary stats: {summary_stats}. provide 3 key insights about this data."
+        ai_col1, ai_col2 = st.columns(2)
 
-                    # Initialize generator (lightweight)
-                    generator = get_ai_pipeline()
-                    insights = generator(prompt, max_length=200, num_return_sequences=1)[0]['generated_text']
+        with ai_col1:
+            if st.button("🤖 Generate AI Analysis", use_container_width=True):
+                with st.spinner("AI is analyzing your data..."):
+                    try:
+                        # Summarize data for AI
+                        summary_stats = S["df"].describe().to_string()
+                        cols = ", ".join(S["df"].columns)
+                        prompt = (
+                            f"Context: Machine Learning Dataset Analysis.\n"
+                            f"Columns: {cols}\n"
+                            f"Stats: {summary_stats}\n"
+                            f"Task: Provide 3 professional data insights and 1 preprocessing recommendation. "
+                            f"Be concise and technical."
+                        )
 
-                    st.markdown("<div class='success-box'>", unsafe_allow_html=True)
-                    st.write(insights.replace(prompt, "").strip())
-                    st.markdown("</div>", unsafe_allow_html=True)
-                except Exception as e:
-                    st.error(f"❌ AI analysis failed: {str(e)}")
+                        # Initialize generator (lightweight)
+                        generator = get_ai_pipeline()
+                        insights = generator(prompt, max_length=300, num_return_sequences=1)[0]['generated_text']
+
+                        st.markdown("<div class='success-box'>", unsafe_allow_html=True)
+                        st.write(insights.replace(prompt, "").strip())
+                        st.markdown("</div>", unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"❌ AI analysis failed: {str(e)}")
+
+        with ai_col2:
+            st.write("💬 **Chat with your Data**")
+            user_query = st.text_input("Ask a question about your dataset", placeholder="e.g., Which features should I scale?")
+            if user_query:
+                with st.spinner("Thinking..."):
+                    try:
+                        summary_stats = S["df"].describe().to_string()
+                        prompt = f"Dataset Summary: {summary_stats}\nUser Question: {user_query}\nAnswer:"
+                        generator = get_ai_pipeline()
+                        answer = generator(prompt, max_length=150, num_return_sequences=1)[0]['generated_text']
+                        st.info(answer.replace(prompt, "").strip())
+                    except Exception as e:
+                        st.error(f"❌ AI Chat failed: {str(e)}")
 
     # EDA Section
     if S["df"] is not None:
@@ -588,6 +636,21 @@ elif S["page"] == "preprocess":
     
     df = S["df"].copy()
     steps_applied = []
+
+    # AI Preprocessing Recommendations
+    if TRANSFORMERS_OK:
+        with st.expander("🤖 AI Preprocessing Recommendations"):
+            if st.button("Get AI Recommendations"):
+                with st.spinner("AI is analyzing features..."):
+                    try:
+                        cols = ", ".join(df.columns)
+                        nulls = df.isnull().sum().to_dict()
+                        prompt = f"Dataset Columns: {cols}\nMissing Values: {nulls}\nProvide 3 specific preprocessing steps for this data."
+                        generator = get_ai_pipeline()
+                        recs = generator(prompt, max_length=200)[0]['generated_text']
+                        st.info(recs.replace(prompt, "").strip())
+                    except Exception as e:
+                        st.error(f"❌ AI Recommendations failed: {str(e)}")
     
     # 1. Missing Values
     with st.expander("1️⃣ Handle Missing Values", expanded=True):
@@ -766,7 +829,19 @@ elif S["page"] == "preprocess":
     
     # Apply preprocessing
     st.markdown("---")
-    if st.button("💾 Apply Preprocessing", type="primary"):
+    col_proc1, col_proc2 = st.columns(2)
+    with col_proc1:
+        st.download_button(
+            "📥 Download Preprocessed CSV",
+            df.to_csv(index=False).encode('utf-8'),
+            "preprocessed_data.csv",
+            "text/csv",
+            use_container_width=True
+        )
+    with col_proc2:
+        apply_btn = st.button("💾 Apply Preprocessing", type="primary", use_container_width=True)
+
+    if apply_btn:
         # Drop rows that may have NaNs after previous steps (e.g., division by zero)
         df = df.dropna().reset_index(drop=True)
         
@@ -1278,6 +1353,7 @@ elif S["page"] == "train":
                     S["results"] = results
                     S["task"] = task
                     S["final_cols"] = [c for c in df.columns if c != S["target"]]
+                    S["leaderboard"].append(results)
 
                     st.success(f"✅ AutoML found the best model: **{results['model']}**")
                     st.dataframe(results_df, use_container_width=True)
@@ -1433,6 +1509,7 @@ elif S["page"] == "train":
                 S["final_cols"] = list(X.columns)
                 S["results"] = results
                 S["task"] = task
+                S["leaderboard"].append(results)
                 
                 st.success("✅ Training completed successfully! Check the **Playground** or **Results** tab.")
                 
@@ -1867,7 +1944,22 @@ elif S["page"] == "results":
         st.info("📈 Train a model to see results here")
         st.stop()
     
-    st.markdown("### 🎯 Training Summary")
+    # Session Leaderboard
+    if S["leaderboard"]:
+        st.markdown("### 🏆 Session Leaderboard")
+        l_df = pd.DataFrame(S["leaderboard"])
+        # Reorder columns for better visibility
+        cols = ["model", "task"]
+        if "accuracy" in l_df.columns: cols.append("accuracy")
+        if "f1_score" in l_df.columns: cols.append("f1_score")
+        if "r2_score" in l_df.columns: cols.append("r2_score")
+        if "rmse" in l_df.columns: cols.append("rmse")
+        if "training_time_sec" in l_df.columns: cols.append("training_time_sec")
+
+        st.dataframe(l_df[cols].sort_values(by=cols[2] if len(cols)>2 else "model", ascending=False), use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("### 🎯 Latest Training Summary")
     
     results = S["results"]
     
@@ -2039,6 +2131,11 @@ elif S["page"] == "deployment":
                         features = [c for c in S["df"].columns if c != S.get("target")]
                     else:
                         features = []
+
+                if features:
+                    st.info(f"📋 Model expects **{len(features)}** features.")
+                    with st.expander("Show expected features"):
+                        st.write(", ".join(features))
             except Exception as e:
                 st.error(f"❌ Failed to load model: {str(e)}")
                 model = None
@@ -2096,9 +2193,24 @@ elif S["page"] == "deployment":
 # ===================== HELP =====================
 elif S["page"] == "help":
     st.title("❓ Help & Documentation")
-    
+
+    with st.expander("🎓 Interactive Quick Start Guide", expanded=True):
+        st.write("Welcome to AutoML Pilot! Follow these steps to build your first model:")
+        step = st.select_slider("Select Step", options=["Upload", "Preprocess", "Train", "Evaluate", "Deploy"])
+
+        if step == "Upload":
+            st.info("📂 Go to **Dashboard**, upload your CSV, and check the AI Insights.")
+        elif step == "Preprocess":
+            st.info("🧹 Clean your data. Use AI Recommendations to find the best cleaning strategy.")
+        elif step == "Train":
+            st.info("🧠 Select your target and task. Try **AutoML** to let the system find the best model for you.")
+        elif step == "Evaluate":
+            st.info("📊 Check the **Results** and **Playground** to see how your model performs.")
+        elif step == "Deploy":
+            st.info("🚀 Download your `.pkl` model and test it in the **Deployment** tab.")
+
     st.markdown("""
-    ## 🚀 Quick Start Guide
+    ## 🚀 Reference Guide
     
     ### 1. Upload Data (**Dashboard**)
     - Upload a **CSV** file.
