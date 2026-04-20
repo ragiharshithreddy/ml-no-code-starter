@@ -247,28 +247,42 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
         msg["From"] = f"{SENDER_NAME} <{OWNER_ALIAS}>"
         msg["To"] = to_email
         
+        # Generate summary table for email
+        summary_table = "<table style='width:100%; border-collapse: collapse; margin-top: 10px;'>"
+        summary_table += "<tr style='background-color: #f3f4f6; text-align: left;'><th style='padding: 8px; border: 1px solid #ddd;'>Metric</th><th style='padding: 8px; border: 1px solid #ddd;'>Value</th></tr>"
+
+        relevant_metrics = ['model', 'task', 'accuracy', 'f1_score', 'r2_score', 'rmse', 'training_time_sec']
+        for k, v in results.items():
+            if k in relevant_metrics:
+                display_v = f"{v*100:.2f}%" if k == 'accuracy' else str(v)
+                summary_table += f"<tr><td style='padding: 8px; border: 1px solid #ddd;'>{k.replace('_', ' ').title()}</td><td style='padding: 8px; border: 1px solid #ddd;'>{display_v}</td></tr>"
+        summary_table += "</table>"
+
         html_body = f"""
         <html>
-        <body style='font-family:Inter,system-ui; padding:20px; background:#f0f2f6;'>
-          <div style='max-width:600px; margin:0 auto; background:white; padding:32px; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.05); border: 1px solid #e1e4e8;'>
-            <div style='text-align:center; margin-bottom:24px;'>
-                <h1 style='color:#7c3aed; margin:0; font-size:28px;'>🚀 AutoMLPilot Pro</h1>
-                <p style='color:#6b7280; margin:4px 0 0 0;'>Your Automated Machine Learning Report</p>
+        <body style='font-family:Inter,system-ui, -apple-system, sans-serif; padding:20px; background:#f4f7f9;'>
+          <div style='max-width:600px; margin:0 auto; background:white; padding:40px; border-radius:20px; box-shadow:0 15px 35px rgba(0,0,0,0.1); border: 1px solid #eef2f6;'>
+            <div style='text-align:center; margin-bottom:30px;'>
+                <div style='background: linear-gradient(135deg, #7c3aed 0%, #4f46e5 100%); width: 60px; height: 60px; border-radius: 15px; display: inline-flex; align-items: center; justify-content: center; margin-bottom: 15px;'>
+                    <span style='font-size: 30px; color: white;'>🚀</span>
+                </div>
+                <h1 style='color:#1e293b; margin:0; font-size:32px; font-weight: 800;'>AutoMLPilot <span style='color:#7c3aed'>Pro</span></h1>
+                <p style='color:#64748b; margin:8px 0 0 0; font-size: 16px;'>Intelligent Automated Machine Learning Report</p>
             </div>
 
-            <div style='background:#f9fafb; padding:20px; border-radius:12px; margin-bottom:24px; border-left: 4px solid #7c3aed;'>
-                <h3 style='margin-top:0; color:#1f2937;'>📊 Model Summary</h3>
-                <p style='margin:4px 0;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
-                <p style='margin:4px 0;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
-                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task') == "Classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
+            <div style='background:#f8fafc; padding:25px; border-radius:16px; margin-bottom:30px; border-left: 5px solid #7c3aed;'>
+                <h3 style='margin-top:0; color:#1e293b; font-size: 18px;'>📊 Key Performance Indicators</h3>
+                {summary_table}
             </div>
 
             {extra_html}
 
-            <h3 style='color:#1f2937; margin-bottom:12px;'>📋 Detailed Metrics</h3>
-            <pre style='background:#1e293b; color:#f8fafc; border:1px solid #334155; padding:20px; border-radius:12px; overflow-x:auto; font-size:13px; line-height:1.5;'>
-{json.dumps(results, indent=2)}
-            </pre>
+            <div style='margin-top: 30px;'>
+                <h3 style='color:#1e293b; margin-bottom:15px; font-size: 18px;'>📋 Technical Metadata</h3>
+                <div style='background:#0f172a; color:#cbd5e1; padding:25px; border-radius:16px; overflow-x:auto; font-family: \"Fira Code\", monospace; font-size:13px; line-height:1.6;'>
+                    <pre style='margin:0;'>{json.dumps(results, indent=2)}</pre>
+                </div>
+            </div>
 
             <div style='text-align:center; margin-top:32px; padding-top:24px; border-top:1px solid #e1e4e8;'>
                 <p style='color:#94a3b8; font-size:12px; margin:0;'>
@@ -397,8 +411,10 @@ if "S" not in st.session_state:
         "scaler": None,
         "scaler_name": None,
         "results": {},
+        "leaderboard": [],
         "unsup_labels": None,
         "preprocessing_steps": [],
+        "chat_history": [],
     }
 S = st.session_state.S
 
@@ -426,9 +442,10 @@ with st.sidebar:
     st.subheader("🧭 Navigation")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "chat", "preprocess", "train", "playground", "unsupervised", "results", "deployment", "help"]
     nav_labels = {
         "dashboard":"📁 Dashboard",
+        "chat":"🤖 Chat with Data",
         "preprocess":"🧹 Preprocess",
         "train":"🧠 Train (Supervised)",
         "playground":"🎨 Playground",
@@ -570,6 +587,55 @@ if S["page"] == "dashboard":
                 except Exception as e:
                     st.error(f"❌ EDA generation failed: {str(e)}")
 
+# ===================== CHAT WITH DATA =====================
+elif S["page"] == "chat":
+    st.title("🤖 Chat with your Data")
+    st.markdown("### Powered by local SOTA AI")
+
+    if S["df"] is None:
+        st.info("📁 Please upload a dataset first from the Dashboard.")
+        st.stop()
+
+    if not TRANSFORMERS_OK:
+        st.error("❌ Transformers library not installed. AI features are disabled.")
+        st.stop()
+
+    # Chat interface
+    chat_container = st.container()
+
+    with chat_container:
+        for message in S["chat_history"]:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+    if prompt := st.chat_input("Ask me about your data..."):
+        S["chat_history"].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("AI is thinking..."):
+                try:
+                    # Data context
+                    cols = ", ".join(S["df"].columns)
+                    stats = S["df"].describe().to_string()
+                    data_context = f"Context: Dataset has columns: {cols}. Numeric summary: {stats}.\n"
+
+                    full_prompt = f"{data_context}User asked: {prompt}\nAssistant:"
+
+                    generator = get_ai_pipeline()
+                    response = generator(full_prompt, max_new_tokens=100, num_return_sequences=1)[0]['generated_text']
+
+                    # Clean response
+                    answer = response.replace(full_prompt, "").strip()
+                    if not answer:
+                        answer = "I'm sorry, I couldn't generate a specific answer. Your data has " + str(len(S["df"].columns)) + " columns and " + str(len(S["df"])) + " rows."
+
+                    st.markdown(answer)
+                    S["chat_history"].append({"role": "assistant", "content": answer})
+                except Exception as e:
+                    st.error(f"❌ AI Error: {str(e)}")
+
 # ===================== PREPROCESS =====================
 elif S["page"] == "preprocess":
     st.title("🧹 Preprocessing Studio")
@@ -588,7 +654,27 @@ elif S["page"] == "preprocess":
     
     df = S["df"].copy()
     steps_applied = []
-    
+
+    # AI Preprocessing Recommendations
+    if TRANSFORMERS_OK:
+        with st.expander("✨ AI Preprocessing Suggestions", expanded=False):
+            if st.button("🤖 Get AI Recommendations"):
+                with st.spinner("AI is analyzing your data structure..."):
+                    try:
+                        missing = df.isnull().sum().to_dict()
+                        types = df.dtypes.to_dict()
+                        summary = f"Data Summary: Missing values: {missing}. Column types: {types}."
+                        prompt = f"{summary} Suggest the best preprocessing steps for this data. Focus on imputation, encoding and scaling."
+
+                        generator = get_ai_pipeline()
+                        recommendations = generator(prompt, max_new_tokens=100, num_return_sequences=1)[0]['generated_text']
+
+                        st.markdown("<div class='success-box'>", unsafe_allow_html=True)
+                        st.write(recommendations.replace(prompt, "").strip())
+                        st.markdown("</div>", unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"❌ AI suggestion failed: {str(e)}")
+
     # 1. Missing Values
     with st.expander("1️⃣ Handle Missing Values", expanded=True):
         missing_count = df.isnull().sum().sum()
@@ -1278,6 +1364,7 @@ elif S["page"] == "train":
                     S["results"] = results
                     S["task"] = task
                     S["final_cols"] = [c for c in df.columns if c != S["target"]]
+                    S["leaderboard"].append(results)
 
                     st.success(f"✅ AutoML found the best model: **{results['model']}**")
                     st.dataframe(results_df, use_container_width=True)
@@ -1433,6 +1520,7 @@ elif S["page"] == "train":
                 S["final_cols"] = list(X.columns)
                 S["results"] = results
                 S["task"] = task
+                S["leaderboard"].append(results)
                 
                 st.success("✅ Training completed successfully! Check the **Playground** or **Results** tab.")
                 
@@ -1867,7 +1955,27 @@ elif S["page"] == "results":
         st.info("📈 Train a model to see results here")
         st.stop()
     
-    st.markdown("### 🎯 Training Summary")
+    # Leaderboard Section
+    if S["leaderboard"]:
+        st.markdown("### 🏆 Model Leaderboard")
+        leaderboard_df = pd.DataFrame(S["leaderboard"])
+
+        # Select relevant columns for display
+        cols_to_show = ['model', 'task']
+        if S["task"] == "Classification":
+            cols_to_show.extend(['accuracy', 'f1_score'])
+        else:
+            cols_to_show.extend(['r2_score', 'rmse'])
+
+        if 'training_time_sec' in leaderboard_df.columns:
+            cols_to_show.append('training_time_sec')
+
+        st.dataframe(leaderboard_df[cols_to_show].sort_values(
+            by=cols_to_show[2], ascending=False
+        ), use_container_width=True)
+
+    st.markdown("---")
+    st.markdown("### 🎯 Current Model Summary")
     
     results = S["results"]
     
@@ -2018,32 +2126,41 @@ elif S["page"] == "deployment":
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        st.markdown("#### 📤 Upload Model")
-        uploaded_model = st.file_uploader("Upload .pkl model file", type=["pkl"])
+        st.markdown("#### 📤 Model Source")
+        model_source = st.radio("Select Model Source", ["Current Session", "Upload File"])
 
-        if uploaded_model is not None:
-            try:
-                # Load the model
-                # PyCaret models often need joblib or special load
-                model = joblib.load(uploaded_model)
-                st.success("✅ Model loaded successfully!")
+        model = None
+        features = []
 
-                # Check if we have feature info
-                if hasattr(model, 'feature_names_in_'):
-                    features = list(model.feature_names_in_)
-                elif S.get("final_cols"):
-                    features = S["final_cols"]
-                else:
-                    st.warning("⚠️ Could not detect feature names from model. Using original dataset columns if available.")
-                    if S["df"] is not None:
-                        features = [c for c in S["df"].columns if c != S.get("target")]
-                    else:
-                        features = []
-            except Exception as e:
-                st.error(f"❌ Failed to load model: {str(e)}")
-                model = None
+        if model_source == "Current Session":
+            if S.get("model") is not None:
+                model = S["model"]
+                features = S.get("final_cols", [])
+                st.success(f"✅ Using trained model: **{S.get('results', {}).get('model', 'Unknown')}**")
+            else:
+                st.info("ℹ️ No model trained in current session yet.")
         else:
-            model = None
+            uploaded_model = st.file_uploader("Upload .pkl model file", type=["pkl"])
+            if uploaded_model is not None:
+                try:
+                    # Load the model
+                    model = joblib.load(uploaded_model)
+                    st.success("✅ Model loaded successfully!")
+
+                    # Check if we have feature info
+                    if hasattr(model, 'feature_names_in_'):
+                        features = list(model.feature_names_in_)
+                    elif S.get("final_cols"):
+                        features = S["final_cols"]
+                    else:
+                        st.warning("⚠️ Could not detect feature names from model. Using original dataset columns if available.")
+                        if S["df"] is not None:
+                            features = [c for c in S["df"].columns if c != S.get("target")]
+                        else:
+                            features = []
+                except Exception as e:
+                    st.error(f"❌ Failed to load model: {str(e)}")
+                    model = None
 
     with col2:
         if model is not None and features:
@@ -2068,8 +2185,28 @@ elif S["page"] == "deployment":
             if st.button("✨ Predict"):
                 try:
                     input_df = pd.DataFrame([input_data])
+
+                    # Apply label encoding for categorical columns if they exist in session
+                    for col, encoder in S.get("label_encoders", {}).items():
+                        if col in input_df.columns:
+                            try:
+                                # Handle unseen labels by assigning a default or taking the closest
+                                if input_df[col].iloc[0] not in encoder.classes_:
+                                    st.warning(f"⚠️ Unseen value '{input_df[col].iloc[0]}' for {col}. Using default.")
+                                    input_df[col] = encoder.transform([encoder.classes_[0]])
+                                else:
+                                    input_df[col] = encoder.transform(input_df[col])
+                            except Exception:
+                                pass
+
+                    # Apply scaling if it exists in session
+                    if S.get("scaler") is not None:
+                        num_cols = input_df.select_dtypes(include=[np.number]).columns.tolist()
+                        if num_cols:
+                            input_df[num_cols] = S["scaler"].transform(input_df[num_cols])
+
                     # If it's a PyCaret model, we might need to use predict_model
-                    if 'pycaret' in str(type(model)):
+                    if 'pycaret' in str(type(model)) or 'Pipeline' in str(type(model)):
                         from pycaret.classification import predict_model as cls_pred
                         from pycaret.regression import predict_model as reg_pred
 
