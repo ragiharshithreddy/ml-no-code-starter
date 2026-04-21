@@ -106,42 +106,44 @@ if ENABLE_EMAIL and (not OWNER_GMAIL or not OWNER_APP_PASSWORD):
 # Set page layout to wide and remove sidebar margins for fixed layout
 st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
 
-THEME = """
+def get_theme(dark):
+    return f"""
 <style>
     /* Gradient Background */
-    :root { 
-        --bg1: #ffe5f0; 
-        --bg2: #e6e9ff; 
-        --card: rgba(255,255,255,0.8); 
-        --border: rgba(255,255,255,0.35); 
+    :root {{
+        --bg1: {'#1e1b4b' if dark else '#ffe5f0'};
+        --bg2: {'#312e81' if dark else '#e6e9ff'};
+        --card: {'rgba(30,41,59,0.8)' if dark else 'rgba(255,255,255,0.8)'};
+        --border: {'rgba(255,255,255,0.1)' if dark else 'rgba(255,255,255,0.35)'};
         --primary-color: #7c3aed;
-    }
-    .main { 
+        --text-color: {'#f8fafc' if dark else '#0f172a'};
+    }}
+    .main {{
         background: radial-gradient(1200px 600px at 10% 10%, var(--bg1), transparent),
                 radial-gradient(900px 500px at 90% 20%, var(--bg2), transparent),
-                linear-gradient(120deg,#f9fafb,#eef2ff); 
-    }
+                linear-gradient(120deg,{'#0f172a' if dark else '#f9fafb'},{'#1e1b4b' if dark else '#eef2ff'});
+    }}
     
     /* Fixed Layout Overrides */
     
     /* Prevent overall page scrolling and set height */
-    .stApp {
+    .stApp {{
         min-height: 100vh;
         max-height: 100vh;
         overflow: hidden; /* Main app container should not scroll */
-    }
+    }}
     
     /* Main Content Container: Fixed size & internal scroll */
-    .block-container { 
+    .block-container {{
         padding: 1rem 2rem 0rem 2rem; /* Reduced bottom padding to maximize space */
         height: calc(100vh - 80px); /* Total viewport height minus header height */
         overflow-y: auto; /* Internal scrolling for content */
         margin-top: 80px; /* Offset for fixed header */
         max-width: 100% !important;
-    }
+    }}
     
     /* Fixed Header Styling */
-    .topbar { 
+    .topbar {{
         position: fixed; /* Fix position */
         top: 0; 
         left: 0;
@@ -155,28 +157,28 @@ THEME = """
         display: flex;
         align-items: center;
         box-shadow: 0 4px 12px rgba(31,41,55,.05);
-    }
-    .topbar > div {
+    }}
+    .topbar > div {{
         width: 100%;
-    }
+    }}
 
     /* Fixed Sidebar & Navigation Buttons */
-    .stSidebar {
+    .stSidebar {{
         position: fixed;
         height: 100vh;
         padding-top: 80px; /* Offset for fixed header */
         z-index: 990;
-    }
+    }}
     /* Style for the sidebar radio/buttons */
-    [data-testid="stSidebarContent"] .stRadio > div {
+    [data-testid="stSidebarContent"] .stRadio > div {{
         flex-direction: column !important;
         align-items: stretch;
-    }
-    [data-testid="stSidebarContent"] .stRadio > div > label {
+    }}
+    [data-testid="stSidebarContent"] .stRadio > div > label {{
         margin-bottom: 8px;
         padding: 0;
-    }
-    [data-testid="stSidebarContent"] .stRadio label > div {
+    }}
+    [data-testid="stSidebarContent"] .stRadio label > div {{
         /* Style the radio label as a pill button */
         padding: 10px 15px;
         border-radius: 999px;
@@ -186,49 +188,50 @@ THEME = """
         font-weight: 500;
         text-align: left;
         transition: all 0.2s ease;
-    }
-    [data-testid="stSidebarContent"] .stRadio label:hover > div {
+    }}
+    [data-testid="stSidebarContent"] .stRadio label:hover > div {{
         background: #dce7ff;
-    }
-    [data-testid="stSidebarContent"] .stRadio input:checked + div > div {
+    }}
+    [data-testid="stSidebarContent"] .stRadio input:checked + div > div {{
         /* Selected button style */
         background: var(--primary-color);
         color: white;
         border-color: var(--primary-color);
         box-shadow: 0 2px 5px rgba(124, 58, 237, 0.3);
-    }
-    [data-testid="stSidebarContent"] .stRadio input:checked + div > div > div:first-child {
+    }}
+    [data-testid="stSidebarContent"] .stRadio input:checked + div > div > div:first-child {{
         background-color: transparent !important; /* Hide default radio dot */
-    }
+    }}
     /* Hide the default Streamlit radio dot entirely for the button style */
-    .stRadio input[type="radio"] {
+    .stRadio input[type="radio"] {{
         display: none !important;
-    }
+    }}
 
 
     /* Existing styles */
-    h1,h2,h3,h4 { color:#0f172a; }
-    .chip { display:inline-block; padding:.25rem .6rem; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; font-size:.8rem; }
-    .card { background: var(--card); border:1px solid var(--border); border-radius:20px; box-shadow: 0 12px 35px rgba(31,41,55,.12); padding:16px; }
-    .metric { background: rgba(255,255,255,0.75); border-left:4px solid #8b5cf6; border-radius:14px; padding:12px; margin:8px 0; }
-    .pillbtn button { border-radius:999px !important; }
-    .small { color:#475569; font-size:.85rem; }
-    .tooltip { color:#6b7280; font-size:.85rem; }
-    .error-box { background:#fee; border-left:4px solid #dc2626; padding:12px; border-radius:8px; margin:8px 0; }
-    .success-box { background:#efe; border-left:4px solid #16a34a; padding:12px; border-radius:8px; margin:8px 0; }
+    h1,h2,h3,h4 {{ color: var(--text-color); }}
+    p, span, label, .stMarkdown {{ color: var(--text-color); }}
+    .chip {{ display:inline-block; padding:.25rem .6rem; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; font-size:.8rem; }}
+    .card {{ background: var(--card); border:1px solid var(--border); border-radius:20px; box-shadow: 0 12px 35px rgba(31,41,55,.12); padding:16px; }}
+    .metric {{ background: rgba(255,255,255,0.75); border-left:4px solid #8b5cf6; border-radius:14px; padding:12px; margin:8px 0; }}
+    .pillbtn button {{ border-radius:999px !important; }}
+    .small {{ color:#475569; font-size:.85rem; }}
+    .tooltip {{ color:#6b7280; font-size:.85rem; }}
+    .error-box {{ background:#fee; border-left:4px solid #dc2626; padding:12px; border-radius:8px; margin:8px 0; }}
+    .success-box {{ background:#efe; border-left:4px solid #16a34a; padding:12px; border-radius:8px; margin:8px 0; }}
 
     /* Fix Plotly/Matplotlib in non-scrolling content */
-    .stPlotlyChart, .stImage, .stMatplotlib {
+    .stPlotlyChart, .stImage, .stMatplotlib {{
         max-height: 55vh; /* Limit chart height if needed, otherwise default */
         overflow: auto;
-    }
-    .stForm {
+    }}
+    .stForm {{
         overflow: hidden; /* Prevents form from creating unwanted scrollbars */
-    }
+    }}
 </style>
 """
 
-st.markdown(THEME, unsafe_allow_html=True)
+# Theme is handled in sidebar
 
 # ===================== HELPER FUNCTIONS (UNCHANGED) =====================
 def send_results_email(to_email: str, subject: str, results: dict, extra_html: str = ""):
@@ -247,33 +250,73 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
         msg["From"] = f"{SENDER_NAME} <{OWNER_ALIAS}>"
         msg["To"] = to_email
         
+        metrics_table = ""
+        if results.get('task') == "Classification":
+            metrics_table = f"""
+            <table style='width:100%; border-collapse:collapse; margin:20px 0;'>
+                <tr style='background:#f3f4f6;'>
+                    <th style='padding:12px; text-align:left; border:1px solid #e5e7eb;'>Metric</th>
+                    <th style='padding:12px; text-align:right; border:1px solid #e5e7eb;'>Value</th>
+                </tr>
+                <tr>
+                    <td style='padding:12px; border:1px solid #e5e7eb;'>Accuracy</td>
+                    <td style='padding:12px; text-align:right; border:1px solid #e5e7eb; font-weight:bold;'>{results.get('accuracy', 0)*100:.2f}%</td>
+                </tr>
+                <tr>
+                    <td style='padding:12px; border:1px solid #e5e7eb;'>F1 Score</td>
+                    <td style='padding:12px; text-align:right; border:1px solid #e5e7eb; font-weight:bold;'>{results.get('f1_score', 0):.4f}</td>
+                </tr>
+            </table>
+            """
+        else:
+            metrics_table = f"""
+            <table style='width:100%; border-collapse:collapse; margin:20px 0;'>
+                <tr style='background:#f3f4f6;'>
+                    <th style='padding:12px; text-align:left; border:1px solid #e5e7eb;'>Metric</th>
+                    <th style='padding:12px; text-align:right; border:1px solid #e5e7eb;'>Value</th>
+                </tr>
+                <tr>
+                    <td style='padding:12px; border:1px solid #e5e7eb;'>R² Score</td>
+                    <td style='padding:12px; text-align:right; border:1px solid #e5e7eb; font-weight:bold;'>{results.get('r2_score', 0):.4f}</td>
+                </tr>
+                <tr>
+                    <td style='padding:12px; border:1px solid #e5e7eb;'>RMSE</td>
+                    <td style='padding:12px; text-align:right; border:1px solid #e5e7eb; font-weight:bold;'>{results.get('rmse', 0):.4f}</td>
+                </tr>
+            </table>
+            """
+
         html_body = f"""
         <html>
-        <body style='font-family:Inter,system-ui; padding:20px; background:#f0f2f6;'>
-          <div style='max-width:600px; margin:0 auto; background:white; padding:32px; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.05); border: 1px solid #e1e4e8;'>
-            <div style='text-align:center; margin-bottom:24px;'>
-                <h1 style='color:#7c3aed; margin:0; font-size:28px;'>🚀 AutoMLPilot Pro</h1>
-                <p style='color:#6b7280; margin:4px 0 0 0;'>Your Automated Machine Learning Report</p>
+        <body style='font-family:Inter,system-ui,sans-serif; padding:40px 20px; background:#f4f7fa; color:#333;'>
+          <div style='max-width:650px; margin:0 auto; background:white; padding:40px; border-radius:20px; box-shadow:0 15px 35px rgba(0,0,0,0.1); border: 1px solid #eee;'>
+            <div style='text-align:center; margin-bottom:30px;'>
+                <h1 style='color:#7c3aed; margin:0; font-size:32px; letter-spacing:-1px;'>🚀 AutoMLPilot Pro</h1>
+                <p style='color:#666; margin:8px 0 0 0; font-size:16px;'>Machine Learning Report</p>
             </div>
 
-            <div style='background:#f9fafb; padding:20px; border-radius:12px; margin-bottom:24px; border-left: 4px solid #7c3aed;'>
-                <h3 style='margin-top:0; color:#1f2937;'>📊 Model Summary</h3>
-                <p style='margin:4px 0;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
-                <p style='margin:4px 0;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
-                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task') == "Classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
+            <div style='background:#f8faff; padding:25px; border-radius:15px; margin-bottom:30px; border-left: 5px solid #7c3aed;'>
+                <h3 style='margin-top:0; color:#1f2937; font-size:18px;'>📊 Overview</h3>
+                <p style='margin:8px 0; font-size:15px;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
+                <p style='margin:8px 0; font-size:15px;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
             </div>
+
+            <h3 style='color:#1f2937; margin-bottom:15px; font-size:18px;'>📈 Performance Metrics</h3>
+            {metrics_table}
 
             {extra_html}
 
-            <h3 style='color:#1f2937; margin-bottom:12px;'>📋 Detailed Metrics</h3>
-            <pre style='background:#1e293b; color:#f8fafc; border:1px solid #334155; padding:20px; border-radius:12px; overflow-x:auto; font-size:13px; line-height:1.5;'>
-{json.dumps(results, indent=2)}
-            </pre>
+            <div style='margin-top:30px;'>
+                <h3 style='color:#1f2937; margin-bottom:15px; font-size:18px;'>📋 Technical Details</h3>
+                <div style='background:#1e293b; color:#cbd5e1; padding:20px; border-radius:12px; font-family:monospace; font-size:13px; line-height:1.6;'>
+                    {json.dumps(results, indent=2).replace("\n", "<br>").replace("  ", "&nbsp;&nbsp;")}
+                </div>
+            </div>
 
-            <div style='text-align:center; margin-top:32px; padding-top:24px; border-top:1px solid #e1e4e8;'>
-                <p style='color:#94a3b8; font-size:12px; margin:0;'>
-                  This report was generated automatically by AutoMLPilot Pro.<br>
-                  &copy; 2024 AutoMLPilot AI Labs
+            <div style='text-align:center; margin-top:40px; padding-top:30px; border-top:1px solid #eee;'>
+                <p style='color:#999; font-size:13px; margin:0;'>
+                  Generated by <strong>AutoMLPilot Pro</strong><br>
+                  Secure No-Code AI Platform
                 </p>
             </div>
           </div>
@@ -399,6 +442,7 @@ if "S" not in st.session_state:
         "results": {},
         "unsup_labels": None,
         "preprocessing_steps": [],
+        "leaderboard": [],
     }
 S = st.session_state.S
 
@@ -423,15 +467,21 @@ with st.container():
 
 # ===================== SIDEBAR NAV (FIXED & BUTTON-STYLE) =====================
 with st.sidebar:
+    st.title("Settings")
+    dark_mode = st.toggle("🌙 Dark Mode", value=False)
+    st.markdown(get_theme(dark_mode), unsafe_allow_html=True)
+
+    st.markdown("---")
     st.subheader("🧭 Navigation")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "preprocess", "train", "playground", "chat", "unsupervised", "results", "deployment", "help"]
     nav_labels = {
         "dashboard":"📁 Dashboard",
         "preprocess":"🧹 Preprocess",
         "train":"🧠 Train (Supervised)",
         "playground":"🎨 Playground",
+        "chat": "💬 Chat with Data",
         "unsupervised":"🧩 Unsupervised",
         "results":"📊 Results",
         "deployment":"🚀 Deployment",
@@ -764,9 +814,40 @@ elif S["page"] == "preprocess":
                 except Exception as e:
                     st.error(f"❌ Feature selection failed: {str(e)}")
     
+    # AI Suggestions
+    with st.expander("🤖 AI Preprocessing Suggestions", expanded=False):
+        if st.button("🪄 Get AI Suggestions"):
+            with st.spinner("AI is analyzing your data structure..."):
+                try:
+                    summary = S["df"].describe().to_string()
+                    cols = ", ".join(S["df"].columns)
+                    prompt = f"Data Summary:\n{summary}\nColumns: {cols}\nSuggest preprocessing steps for machine learning."
+
+                    generator = get_ai_pipeline()
+                    suggestions = generator(prompt, max_new_tokens=150, num_return_sequences=1)[0]['generated_text']
+
+                    st.markdown("<div class='success-box'>", unsafe_allow_html=True)
+                    st.write(suggestions.replace(prompt, "").strip())
+                    st.markdown("</div>", unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"❌ AI Suggestions failed: {str(e)}")
+
     # Apply preprocessing
     st.markdown("---")
-    if st.button("💾 Apply Preprocessing", type="primary"):
+
+    col_apply, col_download = st.columns(2)
+    with col_apply:
+        apply_clicked = st.button("💾 Apply Preprocessing", type="primary", use_container_width=True)
+    with col_download:
+        st.download_button(
+            label="📥 Download Processed CSV",
+            data=S["df"].to_csv(index=False).encode('utf-8'),
+            file_name="processed_data.csv",
+            mime="text/csv",
+            use_container_width=True
+        )
+
+    if apply_clicked:
         # Drop rows that may have NaNs after previous steps (e.g., division by zero)
         df = df.dropna().reset_index(drop=True)
         
@@ -848,7 +929,7 @@ elif S["page"] == "train":
     # Export to Colab Section
     with st.expander("🚀 Export to Colab", expanded=False):
         st.markdown("#### Generate Training Notebook")
-        st.write("Download a Google Colab compatible notebook to run advanced AutoML on your current dataset.")
+        st.info("💡 **Instructions:**\n1. Download the notebook and your processed dataset.\n2. Upload the notebook to [Google Colab](https://colab.research.google.com/).\n3. Run the cells, upload your dataset when prompted.\n4. After training, the best model (`best_model.pkl`) will be downloaded automatically.\n5. Come back here and upload it to the **Deployment** tab!")
 
         if st.button("📓 Generate Notebook"):
             try:
@@ -1278,6 +1359,7 @@ elif S["page"] == "train":
                     S["results"] = results
                     S["task"] = task
                     S["final_cols"] = [c for c in df.columns if c != S["target"]]
+                    S["leaderboard"].append(results)
 
                     st.success(f"✅ AutoML found the best model: **{results['model']}**")
                     st.dataframe(results_df, use_container_width=True)
@@ -1433,6 +1515,7 @@ elif S["page"] == "train":
                 S["final_cols"] = list(X.columns)
                 S["results"] = results
                 S["task"] = task
+                S["leaderboard"].append(results)
                 
                 st.success("✅ Training completed successfully! Check the **Playground** or **Results** tab.")
                 
@@ -1608,6 +1691,57 @@ elif S["page"] == "playground":
         import traceback
         with st.expander("🔍 Error Details"):
             st.code(traceback.format_exc())
+
+# ===================== CHAT WITH DATA =====================
+elif S["page"] == "chat":
+    st.title("💬 Chat with your Data")
+
+    if S["df"] is None:
+        st.info("📁 Upload a dataset first from the Dashboard.")
+        st.stop()
+
+    if not TRANSFORMERS_OK:
+        st.error("❌ Transformers library not found. Please install it to use the chat feature.")
+        st.stop()
+
+    # Initialize chat history
+    if "messages" not in S:
+        S["messages"] = []
+
+    # Display chat history
+    for message in S["messages"]:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Chat input
+    if prompt := st.chat_input("Ask something about your data..."):
+        # Add user message to history
+        S["messages"].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Generate response
+        with st.chat_message("assistant"):
+            with st.spinner("AI is thinking..."):
+                try:
+                    # Construct context from data
+                    df_head = S["df"].head(5).to_string()
+                    df_info = f"Columns: {', '.join(S['df'].columns)}\nShape: {S['df'].shape}"
+
+                    full_prompt = f"Context: {df_info}\nData Sample:\n{df_head}\n\nQuestion: {prompt}\nAnswer:"
+
+                    generator = get_ai_pipeline()
+                    response = generator(full_prompt, max_new_tokens=100, num_return_sequences=1)[0]['generated_text']
+
+                    # Extract only the answer
+                    answer = response.replace(full_prompt, "").strip()
+                    if not answer:
+                        answer = "I'm sorry, I couldn't generate a specific answer. Could you try rephrasing?"
+
+                    st.markdown(answer)
+                    S["messages"].append({"role": "assistant", "content": answer})
+                except Exception as e:
+                    st.error(f"❌ AI Chat failed: {str(e)}")
 
 # ===================== UNSUPERVISED =====================
 elif S["page"] == "unsupervised":
@@ -1998,17 +2132,48 @@ elif S["page"] == "results":
     else:
         st.warning("⚠️ Email feature is disabled. Configure credentials to enable.")
     
+    # Model Leaderboard
+    if S["leaderboard"]:
+        st.markdown("---")
+        st.markdown("### 🏆 Model Leaderboard")
+        leader_df = pd.DataFrame(S["leaderboard"])
+
+        # Reorder columns to put Model and Task first
+        cols = leader_df.columns.tolist()
+        if "model" in cols: cols.insert(0, cols.pop(cols.index("model")))
+        if "task" in cols: cols.insert(1, cols.pop(cols.index("task")))
+        leader_df = leader_df[cols]
+
+        st.dataframe(leader_df, use_container_width=True)
+
     # Download results
     st.markdown("---")
     st.markdown("### 💾 Download Results")
     
-    results_json = json.dumps(results, indent=2)
-    st.download_button(
-        label="📥 Download as JSON",
-        data=results_json,
-        file_name=f"automl_results_{results.get('model', 'model')}.json",
-        mime="application/json"
-    )
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        results_json = json.dumps(results, indent=2)
+        st.download_button(
+            label="📥 Download Metrics (JSON)",
+            data=results_json,
+            file_name=f"automl_results_{results.get('model', 'model')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+    with col_dl2:
+        if S["model"] is not None:
+            # Save model to buffer
+            import io
+            buffer = io.BytesIO()
+            joblib.dump(S["model"], buffer)
+            st.download_button(
+                label="📥 Download Model (.pkl)",
+                data=buffer.getvalue(),
+                file_name=f"model_{results.get('model', 'trained')}.pkl",
+                mime="application/octet-stream",
+                use_container_width=True
+            )
 
 # ===================== DEPLOYMENT =====================
 elif S["page"] == "deployment":
@@ -2019,31 +2184,38 @@ elif S["page"] == "deployment":
 
     with col1:
         st.markdown("#### 📤 Upload Model")
-        uploaded_model = st.file_uploader("Upload .pkl model file", type=["pkl"])
+        use_session_model = st.checkbox("Use session model", value=S["model"] is not None)
 
-        if uploaded_model is not None:
-            try:
-                # Load the model
-                # PyCaret models often need joblib or special load
-                model = joblib.load(uploaded_model)
-                st.success("✅ Model loaded successfully!")
-
-                # Check if we have feature info
-                if hasattr(model, 'feature_names_in_'):
-                    features = list(model.feature_names_in_)
-                elif S.get("final_cols"):
-                    features = S["final_cols"]
-                else:
-                    st.warning("⚠️ Could not detect feature names from model. Using original dataset columns if available.")
-                    if S["df"] is not None:
-                        features = [c for c in S["df"].columns if c != S.get("target")]
-                    else:
-                        features = []
-            except Exception as e:
-                st.error(f"❌ Failed to load model: {str(e)}")
-                model = None
+        if use_session_model:
+            model = S["model"]
+            features = S["final_cols"]
+            if model:
+                st.success("✅ Using model from current session")
         else:
-            model = None
+            uploaded_model = st.file_uploader("Upload .pkl model file", type=["pkl"])
+
+            if uploaded_model is not None:
+                try:
+                    # Load the model
+                    model = joblib.load(uploaded_model)
+                    st.success("✅ Model loaded successfully!")
+
+                    # Check if we have feature info
+                    if hasattr(model, 'feature_names_in_'):
+                        features = list(model.feature_names_in_)
+                    elif S.get("final_cols"):
+                        features = S["final_cols"]
+                    else:
+                        st.warning("⚠️ Could not detect feature names from model. Using original dataset columns if available.")
+                        if S["df"] is not None:
+                            features = [c for c in S["df"].columns if c != S.get("target")]
+                        else:
+                            features = []
+                except Exception as e:
+                    st.error(f"❌ Failed to load model: {str(e)}")
+                    model = None
+            else:
+                model = None
 
     with col2:
         if model is not None and features:
@@ -2068,7 +2240,20 @@ elif S["page"] == "deployment":
             if st.button("✨ Predict"):
                 try:
                     input_df = pd.DataFrame([input_data])
-                    # If it's a PyCaret model, we might need to use predict_model
+
+                    # Apply session encoders and scaler if using session model
+                    if use_session_model:
+                        # Encode
+                        for col, le in S.get("label_encoders", {}).items():
+                            if col in input_df.columns:
+                                input_df[col] = le.transform(input_df[col].astype(str))
+                        # Scale
+                        if S.get("scaler") and S.get("scaler_name") != "Normalize":
+                            num_cols = input_df.select_dtypes(include=[np.number]).columns.tolist()
+                            if num_cols:
+                                input_df[num_cols] = S["scaler"].transform(input_df[num_cols])
+
+                    # Inference
                     if 'pycaret' in str(type(model)):
                         from pycaret.classification import predict_model as cls_pred
                         from pycaret.regression import predict_model as reg_pred
@@ -2077,7 +2262,7 @@ elif S["page"] == "deployment":
                             preds = cls_pred(model, data=input_df)
                         else:
                             preds = reg_pred(model, data=input_df)
-                        prediction = preds.iloc[0, -1] # Usually last column
+                        prediction = preds.iloc[0, -1]
                     else:
                         prediction = model.predict(input_df)[0]
 
