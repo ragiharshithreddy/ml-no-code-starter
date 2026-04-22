@@ -230,6 +230,29 @@ THEME = """
 
 st.markdown(THEME, unsafe_allow_html=True)
 
+if st.session_state.get("dark_mode"):
+    DARK_THEME = """
+    <style>
+        :root {
+            --bg1: #1e1e2e;
+            --bg2: #181825;
+            --card: rgba(30, 30, 46, 0.95);
+            --border: rgba(255, 255, 255, 0.1);
+            --primary-color: #cba6f7;
+        }
+        .main {
+            background: radial-gradient(1200px 600px at 10% 10%, var(--bg1), transparent),
+                    radial-gradient(900px 500px at 90% 20%, var(--bg2), transparent),
+                    linear-gradient(120deg, #11111b, #181825);
+        }
+        h1,h2,h3,h4,h5,h6, p, label, .small, .tooltip, .stMarkdown { color: #cdd6f4 !important; }
+        .stButton>button { color: #11111b !important; background-color: #cba6f7 !important; }
+        .stDataFrame, [data-testid="stTable"] { filter: invert(0.9) hue-rotate(180deg); }
+        .topbar { background: linear-gradient(90deg, rgba(30, 30, 46, 0.9), rgba(24, 24, 37, 0.7)) !important; }
+    </style>
+    """
+    st.markdown(DARK_THEME, unsafe_allow_html=True)
+
 # ===================== HELPER FUNCTIONS (UNCHANGED) =====================
 def send_results_email(to_email: str, subject: str, results: dict, extra_html: str = ""):
     """Send results via email with proper error handling"""
@@ -247,34 +270,52 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
         msg["From"] = f"{SENDER_NAME} <{OWNER_ALIAS}>"
         msg["To"] = to_email
         
+        # Build metric rows
+        metric_rows = ""
+        if results.get('task') == "Classification":
+            metrics = {
+                "Accuracy": f"{results.get('accuracy', 0)*100:.2f}%",
+                "F1 Score": f"{results.get('f1_score', 0):.4f}",
+                "Training Time": f"{results.get('training_time_sec', 0):.2f}s"
+            }
+        else:
+            metrics = {
+                "R² Score": f"{results.get('r2_score', 0):.4f}",
+                "RMSE": f"{results.get('rmse', 0):.4f}",
+                "MAE": f"{results.get('mae', 0):.4f}"
+            }
+
+        for k, v in metrics.items():
+            metric_rows += f"<tr><td style='padding:8px; border-bottom:1px solid #eee;'><strong>{k}</strong></td><td style='padding:8px; border-bottom:1px solid #eee; text-align:right;'>{v}</td></tr>"
+
         html_body = f"""
         <html>
-        <body style='font-family:Inter,system-ui; padding:20px; background:#f0f2f6;'>
-          <div style='max-width:600px; margin:0 auto; background:white; padding:32px; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.05); border: 1px solid #e1e4e8;'>
-            <div style='text-align:center; margin-bottom:24px;'>
-                <h1 style='color:#7c3aed; margin:0; font-size:28px;'>🚀 AutoMLPilot Pro</h1>
-                <p style='color:#6b7280; margin:4px 0 0 0;'>Your Automated Machine Learning Report</p>
+        <body style='font-family:Segoe UI,Tahoma,Geneva,Verdana,sans-serif; padding:20px; background-color:#f4f7f6; color:#333;'>
+          <div style='max-width:600px; margin:0 auto; background:white; padding:40px; border-radius:20px; box-shadow:0 15px 35px rgba(0,0,0,0.1);'>
+            <div style='text-align:center; border-bottom:2px solid #7c3aed; padding-bottom:20px; margin-bottom:30px;'>
+                <h1 style='color:#7c3aed; margin:0; font-size:32px;'>🚀 AutoMLPilot Pro</h1>
+                <p style='color:#666; margin:5px 0 0 0; font-size:16px;'>Machine Learning Excellence Delivered</p>
             </div>
 
-            <div style='background:#f9fafb; padding:20px; border-radius:12px; margin-bottom:24px; border-left: 4px solid #7c3aed;'>
-                <h3 style='margin-top:0; color:#1f2937;'>📊 Model Summary</h3>
-                <p style='margin:4px 0;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
-                <p style='margin:4px 0;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
-                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task') == "Classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
+            <div style='margin-bottom:30px;'>
+                <h3 style='color:#7c3aed; border-left:4px solid #7c3aed; padding-left:15px; margin-bottom:15px;'>📊 Executive Summary</h3>
+                <table style='width:100%; border-collapse:collapse;'>
+                    <tr><td style='padding:8px; border-bottom:1px solid #eee;'><strong>Model</strong></td><td style='padding:8px; border-bottom:1px solid #eee; text-align:right;'>{results.get('model', 'N/A')}</td></tr>
+                    <tr><td style='padding:8px; border-bottom:1px solid #eee;'><strong>Task Type</strong></td><td style='padding:8px; border-bottom:1px solid #eee; text-align:right;'>{results.get('task', 'N/A')}</td></tr>
+                    {metric_rows}
+                </table>
             </div>
 
-            {extra_html}
+            {f"<div style='margin-bottom:30px;'>{extra_html}</div>" if extra_html else ""}
 
-            <h3 style='color:#1f2937; margin-bottom:12px;'>📋 Detailed Metrics</h3>
-            <pre style='background:#1e293b; color:#f8fafc; border:1px solid #334155; padding:20px; border-radius:12px; overflow-x:auto; font-size:13px; line-height:1.5;'>
-{json.dumps(results, indent=2)}
-            </pre>
+            <div style='background-color:#f8f9fa; padding:20px; border-radius:10px; border:1px solid #e9ecef;'>
+                <h3 style='color:#495057; margin-top:0;'>📋 Raw Data Insights</h3>
+                <pre style='white-space:pre-wrap; font-size:12px; color:#6c757d;'>{json.dumps(results, indent=2)}</pre>
+            </div>
 
-            <div style='text-align:center; margin-top:32px; padding-top:24px; border-top:1px solid #e1e4e8;'>
-                <p style='color:#94a3b8; font-size:12px; margin:0;'>
-                  This report was generated automatically by AutoMLPilot Pro.<br>
-                  &copy; 2024 AutoMLPilot AI Labs
-                </p>
+            <div style='text-align:center; margin-top:40px; color:#999; font-size:12px;'>
+                <p>This automated report was generated by <strong>AutoMLPilot Pro</strong>.</p>
+                <p>&copy; 2024 AutoMLPilot AI Labs • Innovation in Every Byte</p>
             </div>
           </div>
         </body>
@@ -381,6 +422,9 @@ def correlation_recommendations(df: pd.DataFrame, thresh=0.7):
         return []
 
 # ===================== SESSION STATE =====================
+if "messages" not in st.session_state:
+    st.session_state.messages = []
+
 if "S" not in st.session_state:
     st.session_state.S = {
         "page": "dashboard",
@@ -426,11 +470,12 @@ with st.sidebar:
     st.subheader("🧭 Navigation")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
     nav_labels = {
         "dashboard":"📁 Dashboard",
         "preprocess":"🧹 Preprocess",
         "train":"🧠 Train (Supervised)",
+        "chat":"💬 Chat",
         "playground":"🎨 Playground",
         "unsupervised":"🧩 Unsupervised",
         "results":"📊 Results",
@@ -442,12 +487,18 @@ with st.sidebar:
         "Select a Page", 
         nav_options,
         format_func=lambda x: nav_labels[x], 
+        index=nav_options.index(S["page"]) if S["page"] in nav_options else 0,
         key="nav_radio",
         # Use a hidden label and custom CSS to make it button-like
         label_visibility="collapsed" 
     )
     S["page"] = pg
     
+    st.markdown("---")
+    st.subheader("🛠 Settings")
+    dark_mode = st.toggle("🌙 Dark Mode", value=st.session_state.get("dark_mode", False), key="dark_mode_toggle")
+    st.session_state.dark_mode = dark_mode
+
     st.markdown("---")
     if S["df"] is not None:
         st.caption(f"📊 Dataset: **{S['df'].shape[0]}** rows × **{S['df'].shape[1]}** cols")
@@ -578,13 +629,31 @@ elif S["page"] == "preprocess":
         st.info("📁 Please upload a dataset first from the Dashboard.")
         st.stop()
     
-    # Reset to original option
-    if st.button("🔄 Reset to Original Dataset"):
-        if S["df_original"] is not None:
-            S["df"] = S["df_original"].copy()
-            S["preprocessing_steps"] = []
-            st.success("✅ Reset to original dataset")
-            st.rerun()
+    # Reset and AI suggestions
+    col1, col2 = st.columns(2)
+    with col1:
+        if st.button("🔄 Reset to Original Dataset", use_container_width=True):
+            if S["df_original"] is not None:
+                S["df"] = S["df_original"].copy()
+                S["preprocessing_steps"] = []
+                st.success("✅ Reset to original dataset")
+                st.rerun()
+
+    with col2:
+        if TRANSFORMERS_OK:
+            if st.button("🤖 AI Preprocessing Suggestions", use_container_width=True):
+                with st.spinner("AI is analyzing for suggestions..."):
+                    try:
+                        summary = S["df"].describe(include='all').to_string()
+                        prompt = f"Given this data summary:\n{summary[:500]}\nSuggest the best imputation, encoding, and scaling steps."
+                        generator = get_ai_pipeline()
+                        suggestions = generator(prompt, max_length=200)[0]['generated_text']
+                        st.session_state.ai_suggestions = suggestions.replace(prompt, "").strip()
+                    except Exception as e:
+                        st.error(f"❌ AI suggestions failed: {str(e)}")
+
+    if "ai_suggestions" in st.session_state:
+        st.markdown(f"<div class='success-box'><strong>🤖 AI Suggestions:</strong><br>{st.session_state.ai_suggestions}</div>", unsafe_allow_html=True)
     
     df = S["df"].copy()
     steps_applied = []
@@ -1442,6 +1511,55 @@ elif S["page"] == "train":
             with st.expander("🔍 Error Details"):
                 st.code(traceback.format_exc())
 
+# ===================== CHAT =====================
+elif S["page"] == "chat":
+    st.title("💬 Chat with your Data")
+
+    if S["df"] is None:
+        st.info("📁 Upload a dataset first from the Dashboard to start chatting.")
+        st.stop()
+
+    if not TRANSFORMERS_OK:
+        st.error("❌ Transformers library not available. Chat feature is disabled.")
+        st.stop()
+
+    # Display chat messages from history on app rerun
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # React to user input
+    if prompt := st.chat_input("Ask something about your data..."):
+        # Display user message in chat message container
+        st.chat_message("user").markdown(prompt)
+        # Add user message to chat history
+        st.session_state.messages.append({"role": "user", "content": prompt})
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    # Summarize data for AI
+                    cols = ", ".join(S["df"].columns)
+                    row_count = len(S["df"])
+                    sample_data = S["df"].head(3).to_string()
+
+                    full_prompt = f"The dataset has {row_count} rows and columns: {cols}. Here is a sample:\n{sample_data}\n\nUser Question: {prompt}\nAnswer:"
+
+                    # Initialize generator (lightweight)
+                    generator = get_ai_pipeline()
+                    response = generator(full_prompt, max_length=250, num_return_sequences=1)[0]['generated_text']
+
+                    # Clean up response
+                    answer = response.replace(full_prompt, "").strip()
+                    if not answer:
+                        answer = "I'm sorry, I couldn't generate a specific answer for that. Try asking about the columns or data distribution."
+
+                    st.markdown(answer)
+                    # Add assistant response to chat history
+                    st.session_state.messages.append({"role": "assistant", "content": answer})
+                except Exception as e:
+                    st.error(f"❌ Chat failed: {str(e)}")
+
 # ===================== PLAYGROUND =====================
 elif S["page"] == "playground":
     st.title("🎨 Model Playground")
@@ -2068,6 +2186,17 @@ elif S["page"] == "deployment":
             if st.button("✨ Predict"):
                 try:
                     input_df = pd.DataFrame([input_data])
+
+                    # Apply label encoders for manual models if available
+                    if S.get("label_encoders"):
+                        for col, le in S["label_encoders"].items():
+                            if col in input_df.columns:
+                                try:
+                                    input_df[col] = le.transform(input_df[col].astype(str))
+                                except Exception:
+                                    # Fallback if value not in encoder
+                                    st.warning(f"⚠️ Unseen value in column '{col}'. Using default.")
+
                     # If it's a PyCaret model, we might need to use predict_model
                     if 'pycaret' in str(type(model)):
                         from pycaret.classification import predict_model as cls_pred
@@ -2097,30 +2226,53 @@ elif S["page"] == "deployment":
 elif S["page"] == "help":
     st.title("❓ Help & Documentation")
     
+    st.markdown("## 🚀 Quick Start Guide")
+    step = st.select_slider(
+        "Choose a Step",
+        options=["Upload", "Preprocess", "Train", "Advanced", "Results"],
+        key="quick_start_slider"
+    )
+    
+    if step == "Upload":
+        st.markdown("""
+        ### 1. Upload Data (**Dashboard**)
+        - Upload a **CSV** file.
+        - Preview your data and check for missing values.
+        - Use **AI Smart Insights** for a quick overview.
+        """)
+    elif step == "Preprocess":
+        st.markdown("""
+        ### 2. Preprocess (**Preprocess**)
+        - Handle **missing values** (imputation or removal).
+        - Remove **outliers** using the IQR method.
+        - Encode **categorical variables** (One-Hot or Label).
+        - Scale **numerical features** (Standard, MinMax, etc.).
+        - *Pro Tip: Use AI Suggestions for the best pipeline.*
+        """)
+    elif step == "Train":
+        st.markdown("""
+        ### 3. Train Model (**Train (Supervised)**)
+        - Select your **target variable** and confirm **Task Type**.
+        - Optionally create **derived features** in Feature Engineering.
+        - Select and tune **Hyperparameters** or use **PyCaret AutoML**.
+        - Click **Train Model** to run evaluation.
+        """)
+    elif step == "Advanced":
+        st.markdown("""
+        ### 4. Advanced Labs
+        - **Chat**: Interact with your data using natural language.
+        - **Playground**: Visualize decision boundaries or residuals.
+        - **Unsupervised**: Run clustering (KMeans, DBSCAN) or PCA.
+        """)
+    elif step == "Results":
+        st.markdown("""
+        ### 5. Export & Results
+        - **Results**: See detailed metrics and send professional HTML reports via email.
+        - **Deployment**: Test your model with real-time browser inference.
+        - **Download**: Get your `.pkl` model for external use.
+        """)
+    
     st.markdown("""
-    ## 🚀 Quick Start Guide
-    
-    ### 1. Upload Data (**Dashboard**)
-    - Upload a **CSV** file.
-    - Preview your data and check for missing values.
-    
-    ### 2. Preprocess (**Preprocess**)
-    - Handle **missing values** (imputation or removal).
-    - Remove **outliers** using the IQR method.
-    - Encode **categorical variables** (One-Hot or Label).
-    - Scale **numerical features** (Standard, MinMax, etc.). *Important for distance-based models like SVM, KNN, and Neural Networks.*
-    
-    ### 3. Train Model (**Train (Supervised)**)
-    - Select your **target variable** and confirm **Task Type** (Classification/Regression).
-    - Optionally create **derived features** in Feature Engineering.
-    - Select and tune **Hyperparameters** for your chosen model.
-    - Click **Train Model** to run evaluation.
-    
-    ### 4. Other Labs
-    - **Playground**: Visualize model decision boundaries or regression performance.
-    - **Unsupervised**: Run clustering (KMeans, DBSCAN) or dimensionality reduction (PCA).
-    - **Results**: See detailed metrics and download/email the report.
-    
     ---
     
     ## 🤖 Model Selection Guide (Summary)
