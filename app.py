@@ -106,42 +106,54 @@ if ENABLE_EMAIL and (not OWNER_GMAIL or not OWNER_APP_PASSWORD):
 # Set page layout to wide and remove sidebar margins for fixed layout
 st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
 
-THEME = """
+# Theme logic
+dark_mode = st.sidebar.toggle("🌙 Dark Mode", value=False)
+bg1 = "#1e1b4b" if dark_mode else "#ffe5f0"
+bg2 = "#312e81" if dark_mode else "#e6e9ff"
+card = "rgba(30, 41, 59, 0.7)" if dark_mode else "rgba(255,255,255,0.8)"
+border = "rgba(255,255,255,0.1)" if dark_mode else "rgba(255,255,255,0.35)"
+text = "#f8fafc" if dark_mode else "#0f172a"
+header_bg = "linear-gradient(90deg, rgba(15, 23, 42, 0.9), rgba(30, 41, 59, 0.7))" if dark_mode else "linear-gradient(90deg, rgba(255,255,255,0.9), rgba(255,255,255,0.7))"
+
+THEME = f"""
 <style>
     /* Gradient Background */
-    :root { 
-        --bg1: #ffe5f0; 
-        --bg2: #e6e9ff; 
-        --card: rgba(255,255,255,0.8); 
-        --border: rgba(255,255,255,0.35); 
+    :root {{
+        --bg1: {bg1};
+        --bg2: {bg2};
+        --card: {card};
+        --border: {border};
         --primary-color: #7c3aed;
-    }
-    .main { 
+        --text-color: {text};
+    }}
+    .main {{
         background: radial-gradient(1200px 600px at 10% 10%, var(--bg1), transparent),
                 radial-gradient(900px 500px at 90% 20%, var(--bg2), transparent),
-                linear-gradient(120deg,#f9fafb,#eef2ff); 
-    }
+                linear-gradient(120deg, var(--bg1), var(--bg2));
+        color: var(--text-color);
+    }}
     
     /* Fixed Layout Overrides */
     
     /* Prevent overall page scrolling and set height */
-    .stApp {
+    .stApp {{
         min-height: 100vh;
         max-height: 100vh;
         overflow: hidden; /* Main app container should not scroll */
-    }
+        background-color: var(--bg1);
+    }}
     
     /* Main Content Container: Fixed size & internal scroll */
-    .block-container { 
+    .block-container {{
         padding: 1rem 2rem 0rem 2rem; /* Reduced bottom padding to maximize space */
         height: calc(100vh - 80px); /* Total viewport height minus header height */
         overflow-y: auto; /* Internal scrolling for content */
         margin-top: 80px; /* Offset for fixed header */
         max-width: 100% !important;
-    }
+    }}
     
     /* Fixed Header Styling */
-    .topbar { 
+    .topbar {{
         position: fixed; /* Fix position */
         top: 0; 
         left: 0;
@@ -149,34 +161,35 @@ THEME = """
         z-index: 1000; 
         height: 80px;
         backdrop-filter: blur(12px);
-        background: linear-gradient(90deg, rgba(255,255,255,0.9), rgba(255,255,255,0.7)); 
+        background: {header_bg};
         border-bottom: 1px solid var(--border); 
         padding: 0.6rem 2rem; 
         display: flex;
         align-items: center;
         box-shadow: 0 4px 12px rgba(31,41,55,.05);
-    }
-    .topbar > div {
+        color: var(--text-color);
+    }}
+    .topbar > div {{
         width: 100%;
-    }
+    }}
 
     /* Fixed Sidebar & Navigation Buttons */
-    .stSidebar {
+    .stSidebar {{
         position: fixed;
         height: 100vh;
         padding-top: 80px; /* Offset for fixed header */
         z-index: 990;
-    }
+    }}
     /* Style for the sidebar radio/buttons */
-    [data-testid="stSidebarContent"] .stRadio > div {
+    [data-testid="stSidebarContent"] .stRadio > div {{
         flex-direction: column !important;
         align-items: stretch;
-    }
-    [data-testid="stSidebarContent"] .stRadio > div > label {
+    }}
+    [data-testid="stSidebarContent"] .stRadio > div > label {{
         margin-bottom: 8px;
         padding: 0;
-    }
-    [data-testid="stSidebarContent"] .stRadio label > div {
+    }}
+    [data-testid="stSidebarContent"] .stRadio label > div {{
         /* Style the radio label as a pill button */
         padding: 10px 15px;
         border-radius: 999px;
@@ -186,45 +199,46 @@ THEME = """
         font-weight: 500;
         text-align: left;
         transition: all 0.2s ease;
-    }
-    [data-testid="stSidebarContent"] .stRadio label:hover > div {
+    }}
+    [data-testid="stSidebarContent"] .stRadio label:hover > div {{
         background: #dce7ff;
-    }
-    [data-testid="stSidebarContent"] .stRadio input:checked + div > div {
+    }}
+    [data-testid="stSidebarContent"] .stRadio input:checked + div > div {{
         /* Selected button style */
         background: var(--primary-color);
         color: white;
         border-color: var(--primary-color);
         box-shadow: 0 2px 5px rgba(124, 58, 237, 0.3);
-    }
-    [data-testid="stSidebarContent"] .stRadio input:checked + div > div > div:first-child {
+    }}
+    [data-testid="stSidebarContent"] .stRadio input:checked + div > div > div:first-child {{
         background-color: transparent !important; /* Hide default radio dot */
-    }
+    }}
     /* Hide the default Streamlit radio dot entirely for the button style */
-    .stRadio input[type="radio"] {
+    .stRadio input[type="radio"] {{
         display: none !important;
-    }
+    }}
 
 
     /* Existing styles */
-    h1,h2,h3,h4 { color:#0f172a; }
-    .chip { display:inline-block; padding:.25rem .6rem; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; font-size:.8rem; }
-    .card { background: var(--card); border:1px solid var(--border); border-radius:20px; box-shadow: 0 12px 35px rgba(31,41,55,.12); padding:16px; }
-    .metric { background: rgba(255,255,255,0.75); border-left:4px solid #8b5cf6; border-radius:14px; padding:12px; margin:8px 0; }
-    .pillbtn button { border-radius:999px !important; }
-    .small { color:#475569; font-size:.85rem; }
-    .tooltip { color:#6b7280; font-size:.85rem; }
-    .error-box { background:#fee; border-left:4px solid #dc2626; padding:12px; border-radius:8px; margin:8px 0; }
-    .success-box { background:#efe; border-left:4px solid #16a34a; padding:12px; border-radius:8px; margin:8px 0; }
+    h1,h2,h3,h4,h5,h6 {{ color: var(--text-color) !important; }}
+    .chip {{ display:inline-block; padding:.25rem .6rem; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; font-size:.8rem; }}
+    .card {{ background: var(--card); border:1px solid var(--border); border-radius:20px; box-shadow: 0 12px 35px rgba(31,41,55,.12); padding:16px; color: var(--text-color); }}
+    .card h1, .card h2, .card h3 {{ color: var(--text-color) !important; }}
+    .metric {{ background: var(--card); border-left:4px solid #8b5cf6; border-radius:14px; padding:12px; margin:8px 0; color: var(--text-color); }}
+    .pillbtn button {{ border-radius:999px !important; }}
+    .small {{ color: var(--text-color); opacity: 0.8; font-size:.85rem; }}
+    .tooltip {{ color: var(--text-color); opacity: 0.6; font-size:.85rem; }}
+    .error-box {{ background:#fee; border-left:4px solid #dc2626; padding:12px; border-radius:8px; margin:8px 0; color: #991b1b; }}
+    .success-box {{ background:#efe; border-left:4px solid #16a34a; padding:12px; border-radius:8px; margin:8px 0; color: #166534; }}
 
     /* Fix Plotly/Matplotlib in non-scrolling content */
-    .stPlotlyChart, .stImage, .stMatplotlib {
+    .stPlotlyChart, .stImage, .stMatplotlib {{
         max-height: 55vh; /* Limit chart height if needed, otherwise default */
         overflow: auto;
-    }
-    .stForm {
+    }}
+    .stForm {{
         overflow: hidden; /* Prevents form from creating unwanted scrollbars */
-    }
+    }}
 </style>
 """
 
@@ -399,6 +413,7 @@ if "S" not in st.session_state:
         "results": {},
         "unsup_labels": None,
         "preprocessing_steps": [],
+        "chat_history": [],
     }
 S = st.session_state.S
 
@@ -426,11 +441,12 @@ with st.sidebar:
     st.subheader("🧭 Navigation")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
     nav_labels = {
         "dashboard":"📁 Dashboard",
         "preprocess":"🧹 Preprocess",
         "train":"🧠 Train (Supervised)",
+        "chat":"💬 Chat (AI)",
         "playground":"🎨 Playground",
         "unsupervised":"🧩 Unsupervised",
         "results":"📊 Results",
@@ -542,16 +558,29 @@ if S["page"] == "dashboard":
         if st.button("🤖 Generate AI Analysis"):
             with st.spinner("AI is analyzing your data..."):
                 try:
-                    # Summarize data for AI
-                    summary_stats = S["df"].describe().to_string()
+                    # Detailed Analysis for AI
                     cols = ", ".join(S["df"].columns)
-                    prompt = f"Dataset has columns: {cols}. Summary stats: {summary_stats}. provide 3 key insights about this data."
+                    summary = S["df"].describe(include='all').T
+                    nulls = S["df"].isnull().sum()
+                    high_nulls = nulls[nulls > 0].index.tolist()
 
-                    # Initialize generator (lightweight)
+                    # Custom rule-based logic to aid AI
+                    recommendations = []
+                    for col in S["df"].select_dtypes(include=[np.number]).columns:
+                        if S["df"][col].std() > S["df"][col].mean() * 2:
+                            recommendations.append(f"Recommend RobustScaler for '{col}' due to high variance.")
+
+                    prompt = f"Dataset Columns: {cols}. Missing in: {high_nulls}. Based on this, provide 3 specific preprocessing steps and 2 data insights."
+
+                    # Initialize generator
                     generator = get_ai_pipeline()
-                    insights = generator(prompt, max_length=200, num_return_sequences=1)[0]['generated_text']
+                    insights = generator(prompt, max_new_tokens=150, num_return_sequences=1)[0]['generated_text']
 
                     st.markdown("<div class='success-box'>", unsafe_allow_html=True)
+                    st.markdown("#### 🤖 AI Recommendations")
+                    for rec in recommendations:
+                        st.write(f"• {rec}")
+                    st.markdown("---")
                     st.write(insights.replace(prompt, "").strip())
                     st.markdown("</div>", unsafe_allow_html=True)
                 except Exception as e:
@@ -857,11 +886,19 @@ elif S["page"] == "train":
 
                 # Update template with current config
                 for cell in template['cells']:
-                    if cell['cell_type'] == 'code' and 'task_type =' in cell['source'][0]:
-                        cell['source'] = [
-                            f"target_column = '{S['target']}' # @param {{type:\"string\"}}\n",
-                            f"task_type = '{S['task'].lower()}' # @param [\"classification\", \"regression\"]\n"
-                        ]
+                    if cell['cell_type'] == 'code':
+                        # Find the configuration cell and inject values
+                        new_source = []
+                        for line in cell['source']:
+                            if 'target_column =' in line and '@param' in line:
+                                new_source.append(f"target_column = '{S['target']}' # @param {{type:\"string\"}}\n")
+                            elif 'task_type =' in line and '@param' in line:
+                                new_source.append(f"task_type = '{S['task'].lower()}' # @param [\"classification\", \"regression\"]\n")
+                            elif 'recipient_email =' in line and '@param' in line:
+                                new_source.append(f"recipient_email = '{S.get('user_email', '')}' # @param {{type:\"string\"}}\n")
+                            else:
+                                new_source.append(line)
+                        cell['source'] = new_source
 
                 notebook_str = json.dumps(template, indent=2)
                 st.download_button(
@@ -1442,6 +1479,53 @@ elif S["page"] == "train":
             with st.expander("🔍 Error Details"):
                 st.code(traceback.format_exc())
 
+# ===================== CHAT (AI) =====================
+elif S["page"] == "chat":
+    st.title("💬 Chat with your Data")
+
+    if S["df"] is None:
+        st.info("📁 Upload a dataset first from the Dashboard to start chatting.")
+        st.stop()
+
+    if not TRANSFORMERS_OK:
+        st.error("❌ Transformers library not found. Please install it to use the chat feature.")
+        st.stop()
+
+    # Display chat history
+    for message in S["chat_history"]:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Chat input
+    if prompt := st.chat_input("Ask me anything about your dataset..."):
+        # Add user message to history
+        S["chat_history"].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        # Generate AI response
+        with st.chat_message("assistant"):
+            with st.spinner("AI is thinking..."):
+                try:
+                    # Create data context for AI
+                    cols = ", ".join(S["df"].columns)
+                    stats = S["df"].describe().to_string()
+                    data_context = f"The dataset has columns: {cols}. Here are some statistics:\n{stats}\n\nUser asked: {prompt}\nAI response:"
+
+                    generator = get_ai_pipeline()
+                    # We use a shorter max_new_tokens for faster response and to avoid going over limits
+                    response = generator(data_context, max_new_tokens=100, num_return_sequences=1)[0]['generated_text']
+
+                    # Clean up response to only include the AI's part
+                    ai_response = response.replace(data_context, "").strip()
+                    if not ai_response:
+                        ai_response = "I'm sorry, I couldn't generate a specific answer. Could you try rephrasing your question?"
+
+                    st.markdown(ai_response)
+                    S["chat_history"].append({"role": "assistant", "content": ai_response})
+                except Exception as e:
+                    st.error(f"❌ AI Chat failed: {str(e)}")
+
 # ===================== PLAYGROUND =====================
 elif S["page"] == "playground":
     st.title("🎨 Model Playground")
@@ -2018,8 +2102,24 @@ elif S["page"] == "deployment":
     col1, col2 = st.columns([1, 2])
 
     with col1:
-        st.markdown("#### 📤 Upload Model")
-        uploaded_model = st.file_uploader("Upload .pkl model file", type=["pkl"])
+        st.markdown("#### 📤 Load Model")
+        load_type = st.radio("Load Method", ["Upload File", "Import from URL"], horizontal=True)
+
+        uploaded_model = None
+        if load_type == "Upload File":
+            uploaded_model = st.file_uploader("Upload .pkl model file", type=["pkl"])
+        else:
+            model_url = st.text_input("Enter Model URL (.pkl)", placeholder="https://example.com/model.pkl")
+            if model_url:
+                try:
+                    import requests
+                    import io
+                    response = requests.get(model_url)
+                    response.raise_for_status()
+                    uploaded_model = io.BytesIO(response.content)
+                    st.success("✅ Model downloaded from URL!")
+                except Exception as e:
+                    st.error(f"❌ URL Import failed: {str(e)}")
 
         if uploaded_model is not None:
             try:
@@ -2068,6 +2168,22 @@ elif S["page"] == "deployment":
             if st.button("✨ Predict"):
                 try:
                     input_df = pd.DataFrame([input_data])
+
+                    # Apply LabelEncoders if available
+                    if S.get("label_encoders"):
+                        for col, le in S["label_encoders"].items():
+                            if col in input_df.columns:
+                                try:
+                                    # Handle unseen labels by mapping them to the most frequent label or 0
+                                    val = str(input_df[col].iloc[0])
+                                    if val in le.classes_:
+                                        input_df[col] = le.transform([val])[0]
+                                    else:
+                                        st.warning(f"⚠️ Unseen value '{val}' for column '{col}'. Using default.")
+                                        input_df[col] = 0
+                                except:
+                                    input_df[col] = 0
+
                     # If it's a PyCaret model, we might need to use predict_model
                     if 'pycaret' in str(type(model)):
                         from pycaret.classification import predict_model as cls_pred
