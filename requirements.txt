@@ -13,3 +13,4 @@ kaleido
 pycaret
 transformers
 torch
+torchvision
