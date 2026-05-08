@@ -102,46 +102,74 @@ SENDER_NAME = "AutoMLPilot"
 if ENABLE_EMAIL and (not OWNER_GMAIL or not OWNER_APP_PASSWORD):
     ENABLE_EMAIL = False
 
-# ===================== PAGE CONFIG & THEME =====================
-# Set page layout to wide and remove sidebar margins for fixed layout
+# ===================== PAGE CONFIG & SESSION STATE =====================
 st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
 
-THEME = """
+if "S" not in st.session_state:
+    st.session_state.S = {
+        "page": "dashboard",
+        "df": None,
+        "df_original": None,
+        "target": None,
+        "task": "Classification",
+        "user_email": "",
+        "corr_pairs": [],
+        "features_created": [],
+        "model": None,
+        "final_cols": None,
+        "label_encoders": {},
+        "scaler": None,
+        "scaler_name": None,
+        "results": {},
+        "unsup_labels": None,
+        "preprocessing_steps": [],
+        "dark_mode": False,
+        "chat_history": []
+    }
+S = st.session_state.S
+
+# ===================== THEME =====================
+THEME = f"""
 <style>
     /* Gradient Background */
-    :root { 
-        --bg1: #ffe5f0; 
-        --bg2: #e6e9ff; 
-        --card: rgba(255,255,255,0.8); 
-        --border: rgba(255,255,255,0.35); 
+    :root {{
+        --bg1: {"#2d1b4e" if S['dark_mode'] else "#ffe5f0"};
+        --bg2: {"#1a1a2e" if S['dark_mode'] else "#e6e9ff"};
+        --card: {"rgba(30,30,50,0.8)" if S['dark_mode'] else "rgba(255,255,255,0.8)"};
+        --border: {"rgba(255,255,255,0.1)" if S['dark_mode'] else "rgba(255,255,255,0.35)"};
         --primary-color: #7c3aed;
-    }
-    .main { 
+        --text-color: {"#f8fafc" if S['dark_mode'] else "#0f172a"};
+    }}
+
+    [data-testid="stAppViewContainer"] {{
         background: radial-gradient(1200px 600px at 10% 10%, var(--bg1), transparent),
                 radial-gradient(900px 500px at 90% 20%, var(--bg2), transparent),
-                linear-gradient(120deg,#f9fafb,#eef2ff); 
-    }
+                {"linear-gradient(120deg,#0f172a,#1e1b4b)" if S['dark_mode'] else "linear-gradient(120deg,#f9fafb,#eef2ff)"} !important;
+    }}
+
+    .main {{ background: transparent !important; }}
     
     /* Fixed Layout Overrides */
     
     /* Prevent overall page scrolling and set height */
-    .stApp {
+    .stApp {{
         min-height: 100vh;
         max-height: 100vh;
         overflow: hidden; /* Main app container should not scroll */
-    }
+        color: var(--text-color);
+    }}
     
     /* Main Content Container: Fixed size & internal scroll */
-    .block-container { 
+    .block-container {{
         padding: 1rem 2rem 0rem 2rem; /* Reduced bottom padding to maximize space */
         height: calc(100vh - 80px); /* Total viewport height minus header height */
         overflow-y: auto; /* Internal scrolling for content */
         margin-top: 80px; /* Offset for fixed header */
         max-width: 100% !important;
-    }
+    }}
     
     /* Fixed Header Styling */
-    .topbar { 
+    .topbar {{
         position: fixed; /* Fix position */
         top: 0; 
         left: 0;
@@ -155,28 +183,28 @@ THEME = """
         display: flex;
         align-items: center;
         box-shadow: 0 4px 12px rgba(31,41,55,.05);
-    }
-    .topbar > div {
+    }}
+    .topbar > div {{
         width: 100%;
-    }
+    }}
 
     /* Fixed Sidebar & Navigation Buttons */
-    .stSidebar {
+    .stSidebar {{
         position: fixed;
         height: 100vh;
         padding-top: 80px; /* Offset for fixed header */
         z-index: 990;
-    }
+    }}
     /* Style for the sidebar radio/buttons */
-    [data-testid="stSidebarContent"] .stRadio > div {
+    [data-testid="stSidebarContent"] .stRadio > div {{
         flex-direction: column !important;
         align-items: stretch;
-    }
-    [data-testid="stSidebarContent"] .stRadio > div > label {
+    }}
+    [data-testid="stSidebarContent"] .stRadio > div > label {{
         margin-bottom: 8px;
         padding: 0;
-    }
-    [data-testid="stSidebarContent"] .stRadio label > div {
+    }}
+    [data-testid="stSidebarContent"] .stRadio label > div {{
         /* Style the radio label as a pill button */
         padding: 10px 15px;
         border-radius: 999px;
@@ -186,45 +214,45 @@ THEME = """
         font-weight: 500;
         text-align: left;
         transition: all 0.2s ease;
-    }
-    [data-testid="stSidebarContent"] .stRadio label:hover > div {
+    }}
+    [data-testid="stSidebarContent"] .stRadio label:hover > div {{
         background: #dce7ff;
-    }
-    [data-testid="stSidebarContent"] .stRadio input:checked + div > div {
+    }}
+    [data-testid="stSidebarContent"] .stRadio input:checked + div > div {{
         /* Selected button style */
         background: var(--primary-color);
         color: white;
         border-color: var(--primary-color);
         box-shadow: 0 2px 5px rgba(124, 58, 237, 0.3);
-    }
-    [data-testid="stSidebarContent"] .stRadio input:checked + div > div > div:first-child {
+    }}
+    [data-testid="stSidebarContent"] .stRadio input:checked + div > div > div:first-child {{
         background-color: transparent !important; /* Hide default radio dot */
-    }
+    }}
     /* Hide the default Streamlit radio dot entirely for the button style */
-    .stRadio input[type="radio"] {
+    .stRadio input[type="radio"] {{
         display: none !important;
-    }
+    }}
 
 
     /* Existing styles */
-    h1,h2,h3,h4 { color:#0f172a; }
-    .chip { display:inline-block; padding:.25rem .6rem; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; font-size:.8rem; }
-    .card { background: var(--card); border:1px solid var(--border); border-radius:20px; box-shadow: 0 12px 35px rgba(31,41,55,.12); padding:16px; }
-    .metric { background: rgba(255,255,255,0.75); border-left:4px solid #8b5cf6; border-radius:14px; padding:12px; margin:8px 0; }
-    .pillbtn button { border-radius:999px !important; }
-    .small { color:#475569; font-size:.85rem; }
-    .tooltip { color:#6b7280; font-size:.85rem; }
-    .error-box { background:#fee; border-left:4px solid #dc2626; padding:12px; border-radius:8px; margin:8px 0; }
-    .success-box { background:#efe; border-left:4px solid #16a34a; padding:12px; border-radius:8px; margin:8px 0; }
+    h1,h2,h3,h4,h5,h6 {{ color: var(--text-color) !important; }}
+    .chip {{ display:inline-block; padding:.25rem .6rem; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; font-size:.8rem; }}
+    .card {{ background: var(--card); border:1px solid var(--border); border-radius:20px; box-shadow: 0 12px 35px rgba(31,41,55,.12); padding:16px; }}
+    .metric {{ background: rgba(255,255,255,0.75); border-left:4px solid #8b5cf6; border-radius:14px; padding:12px; margin:8px 0; }}
+    .pillbtn button {{ border-radius:999px !important; }}
+    .small {{ color:#475569; font-size:.85rem; }}
+    .tooltip {{ color:#6b7280; font-size:.85rem; }}
+    .error-box {{ background:#fee; border-left:4px solid #dc2626; padding:12px; border-radius:8px; margin:8px 0; }}
+    .success-box {{ background:#efe; border-left:4px solid #16a34a; padding:12px; border-radius:8px; margin:8px 0; }}
 
     /* Fix Plotly/Matplotlib in non-scrolling content */
-    .stPlotlyChart, .stImage, .stMatplotlib {
+    .stPlotlyChart, .stImage, .stMatplotlib {{
         max-height: 55vh; /* Limit chart height if needed, otherwise default */
         overflow: auto;
-    }
-    .stForm {
+    }}
+    .stForm {{
         overflow: hidden; /* Prevents form from creating unwanted scrollbars */
-    }
+    }}
 </style>
 """
 
@@ -380,27 +408,6 @@ def correlation_recommendations(df: pd.DataFrame, thresh=0.7):
         st.error(f"❌ Correlation analysis failed: {str(e)}")
         return []
 
-# ===================== SESSION STATE =====================
-if "S" not in st.session_state:
-    st.session_state.S = {
-        "page": "dashboard",
-        "df": None,
-        "df_original": None,  # Keep original for reference
-        "target": None,
-        "task": "Classification",
-        "user_email": "",
-        "corr_pairs": [],
-        "features_created": [],
-        "model": None,
-        "final_cols": None,
-        "label_encoders": {},
-        "scaler": None,
-        "scaler_name": None,
-        "results": {},
-        "unsup_labels": None,
-        "preprocessing_steps": [],
-    }
-S = st.session_state.S
 
 # ===================== TOP BAR (FIXED) =====================
 with st.container():
@@ -423,14 +430,22 @@ with st.container():
 
 # ===================== SIDEBAR NAV (FIXED & BUTTON-STYLE) =====================
 with st.sidebar:
+    st.subheader("🌙 Theme Settings")
+    dark_mode = st.toggle("Dark Mode", value=S.get("dark_mode", False))
+    if dark_mode != S.get("dark_mode"):
+        S["dark_mode"] = dark_mode
+        st.rerun()
+
+    st.markdown("---")
     st.subheader("🧭 Navigation")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
     nav_labels = {
         "dashboard":"📁 Dashboard",
         "preprocess":"🧹 Preprocess",
         "train":"🧠 Train (Supervised)",
+        "chat":"💬 Chat (AI)",
         "playground":"🎨 Playground",
         "unsupervised":"🧩 Unsupervised",
         "results":"📊 Results",
@@ -857,11 +872,66 @@ elif S["page"] == "train":
 
                 # Update template with current config
                 for cell in template['cells']:
-                    if cell['cell_type'] == 'code' and 'task_type =' in cell['source'][0]:
-                        cell['source'] = [
-                            f"target_column = '{S['target']}' # @param {{type:\"string\"}}\n",
-                            f"task_type = '{S['task'].lower()}' # @param [\"classification\", \"regression\"]\n"
-                        ]
+                    if cell['cell_type'] == 'code':
+                        if 'task_type =' in cell['source'][0]:
+                            cell['source'] = [
+                                f"target_column = '{S['target']}' # @param {{type:\"string\"}}\n",
+                                f"task_type = '{S['task'].lower()}' # @param [\"classification\", \"regression\"]\n"
+                            ]
+                        elif 'recipient_email =' in cell['source'][6]:
+                             cell['source'] = [
+                                "# @title 6. Email Reporting\n",
+                                "import smtplib\n",
+                                "import ssl\n",
+                                "from email.mime.text import MIMEText\n",
+                                "from email.mime.multipart import MIMEMultipart\n",
+                                "\n",
+                                f"recipient_email = \"{S['user_email']}\" # @param {{type:\"string\"}}\n",
+                                "sender_email = \"\" # @param {type:\"string\"}\n",
+                                "sender_password = \"\" # @param {type:\"string\"}\n",
+                                "\n",
+                                "def send_colab_report(to_email, results):\n",
+                                "    if not to_email or not sender_email or not sender_password:\n",
+                                "        print(\"⚠️ Email credentials not provided. Skipping reporting.\")\n",
+                                "        return\n",
+                                "    \n",
+                                "    try:\n",
+                                "        msg = MIMEMultipart(\"alternative\")\n",
+                                "        msg[\"Subject\"] = f\"AutoML Pilot Colab Report - {results.get('model', 'Model')}\"\n",
+                                "        msg[\"From\"] = f\"AutoML Pilot <{sender_email}>\"\n",
+                                "        msg[\"To\"] = to_email\n",
+                                "        \n",
+                                "        html_body = f\"\"\"\n",
+                                "        <html>\n",
+                                "        <body style='font-family:sans-serif; padding:20px;'>\n",
+                                "          <h2 style='color:#7c3aed;'>🚀 Colab Training Report</h2>\n",
+                                "          <div style='background:#f3f4f6; padding:15px; border-radius:8px;'>\n",
+                                "            <p><strong>Model:</strong> {results.get('model')}</p>\n",
+                                "            <p><strong>Task:</strong> {task_type}</p>\n",
+                                "            <p><strong>Best Score:</strong> {results.get('score')}</p>\n",
+                                "          </div>\n",
+                                "        </body>\n",
+                                "        </html>\n",
+                                "        \"\"\"\n",
+                                "        msg.attach(MIMEText(html_body, \"html\"))\n",
+                                "        \n",
+                                "        context = ssl.create_default_context()\n",
+                                "        with smtplib.SMTP_SSL(\"smtp.gmail.com\", 465, context=context) as server:\n",
+                                "            server.login(sender_email, sender_password)\n",
+                                "            server.sendmail(sender_email, to_email, msg.as_string())\n",
+                                "        print(\"✅ Report sent to email!\")\n",
+                                "    except Exception as e:\n",
+                                "        print(f\"❌ Email failed: {e}\")\n",
+                                "\n",
+                                "if 'leaderboard' in locals():\n",
+                                "    best_row = leaderboard.iloc[0]\n",
+                                "    score_col = 'Accuracy' if task_type == 'classification' else 'R2'\n",
+                                "    res = {\n",
+                                "        'model': str(best_model).split('(')[0],\n",
+                                "        'score': f\"{best_row[score_col]:.4f}\" if score_col in best_row else \"N/A\"\n",
+                                "    }\n",
+                                "    send_colab_report(recipient_email, res)"
+                            ]
 
                 notebook_str = json.dumps(template, indent=2)
                 st.download_button(
@@ -2010,10 +2080,61 @@ elif S["page"] == "results":
         mime="application/json"
     )
 
+# ===================== CHAT (AI) =====================
+elif S["page"] == "chat":
+    st.title("💬 Chat with your Data")
+
+    if S["df"] is None:
+        st.info("📁 Please upload a dataset on the Dashboard first.")
+        st.stop()
+
+    if not TRANSFORMERS_OK:
+        st.error("❌ Transformers library not available. AI Chat is disabled.")
+        st.stop()
+
+    st.markdown("### 🤖 AI Assistant")
+    st.write("Ask questions about your data, or get suggestions for your ML project.")
+
+    # Display chat history
+    for message in S["chat_history"]:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    # Chat input
+    if prompt := st.chat_input("What would you like to know about your data?"):
+        S["chat_history"].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("AI is thinking..."):
+                try:
+                    # Construct context
+                    df_summary = S["df"].describe().to_string()
+                    cols = ", ".join(S["df"].columns)
+                    context = f"The dataset has these columns: {cols}. Here is a statistical summary:\n{df_summary}\n\n"
+                    full_prompt = context + f"User asked: {prompt}\nAI Assistant:"
+
+                    generator = get_ai_pipeline()
+                    # Use a shorter max_length for faster response
+                    response = generator(full_prompt, max_length=250, num_return_sequences=1)[0]['generated_text']
+
+                    # Extract only the assistant's response
+                    clean_response = response.replace(full_prompt, "").strip()
+                    if not clean_response:
+                        clean_response = "I'm sorry, I couldn't generate a specific response. Could you try rephrasing?"
+
+                    st.markdown(clean_response)
+                    S["chat_history"].append({"role": "assistant", "content": clean_response})
+                except Exception as e:
+                    st.error(f"❌ AI Chat error: {str(e)}")
+
 # ===================== DEPLOYMENT =====================
 elif S["page"] == "deployment":
     st.title("🚀 Model Deployment & Inference")
     st.markdown("### Test your trained models in the browser")
+
+    st.warning("⚠️ **Security Warning**: Loading models from untrusted sources can execute arbitrary code. Only upload models you trust.")
 
     col1, col2 = st.columns([1, 2])
 
@@ -2021,12 +2142,30 @@ elif S["page"] == "deployment":
         st.markdown("#### 📤 Upload Model")
         uploaded_model = st.file_uploader("Upload .pkl model file", type=["pkl"])
 
+        st.markdown("#### 🌐 Import from URL")
+        model_url = st.text_input("Enter model .pkl URL", placeholder="https://example.com/model.pkl")
+
+        model = None
         if uploaded_model is not None:
             try:
-                # Load the model
-                # PyCaret models often need joblib or special load
                 model = joblib.load(uploaded_model)
-                st.success("✅ Model loaded successfully!")
+                st.success("✅ Model loaded from upload!")
+            except Exception as e:
+                st.error(f"❌ Upload load failed: {e}")
+        elif model_url:
+            try:
+                import requests
+                import io
+                with st.spinner("Downloading model..."):
+                    response = requests.get(model_url)
+                    response.raise_for_status()
+                    model = joblib.load(io.BytesIO(response.content))
+                    st.success("✅ Model loaded from URL!")
+            except Exception as e:
+                st.error(f"❌ URL load failed: {e}")
+
+        if model is not None:
+            try:
 
                 # Check if we have feature info
                 if hasattr(model, 'feature_names_in_'):
@@ -2040,10 +2179,9 @@ elif S["page"] == "deployment":
                     else:
                         features = []
             except Exception as e:
-                st.error(f"❌ Failed to load model: {str(e)}")
-                model = None
+                st.error(f"❌ Failed to extract features: {str(e)}")
         else:
-            model = None
+            features = []
 
     with col2:
         if model is not None and features:
