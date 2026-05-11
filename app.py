@@ -207,10 +207,10 @@ THEME = """
 
 
     /* Existing styles */
-    h1,h2,h3,h4 { color:#0f172a; }
+    h1,h2,h3,h4,h5,h6 { color:#0f172a !important; }
     .chip { display:inline-block; padding:.25rem .6rem; border-radius:999px; background:#eef2ff; color:#4338ca; border:1px solid #c7d2fe; font-size:.8rem; }
     .card { background: var(--card); border:1px solid var(--border); border-radius:20px; box-shadow: 0 12px 35px rgba(31,41,55,.12); padding:16px; }
-    .metric { background: rgba(255,255,255,0.75); border-left:4px solid #8b5cf6; border-radius:14px; padding:12px; margin:8px 0; }
+    .metric { background: rgba(255,255,255,0.75) !important; border-left:4px solid #8b5cf6; border-radius:14px; padding:12px; margin:8px 0; }
     .pillbtn button { border-radius:999px !important; }
     .small { color:#475569; font-size:.85rem; }
     .tooltip { color:#6b7280; font-size:.85rem; }
@@ -247,6 +247,12 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
         msg["From"] = f"{SENDER_NAME} <{OWNER_ALIAS}>"
         msg["To"] = to_email
         
+        # Metrics table generation
+        metrics_rows = ""
+        for k, v in results.items():
+            if k not in ['classification_report', 'pycaret_leaderboard', 'parameters']:
+                metrics_rows += f"<tr><td style='padding:8px; border-bottom:1px solid #edf2f7;'>{k}</td><td style='padding:8px; border-bottom:1px solid #edf2f7;'>{v}</td></tr>"
+
         html_body = f"""
         <html>
         <body style='font-family:Inter,system-ui; padding:20px; background:#f0f2f6;'>
@@ -258,17 +264,12 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
 
             <div style='background:#f9fafb; padding:20px; border-radius:12px; margin-bottom:24px; border-left: 4px solid #7c3aed;'>
                 <h3 style='margin-top:0; color:#1f2937;'>📊 Model Summary</h3>
-                <p style='margin:4px 0;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
-                <p style='margin:4px 0;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
-                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task') == "Classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
+                <table style='width:100%; border-collapse:collapse;'>
+                    {metrics_rows}
+                </table>
             </div>
 
             {extra_html}
-
-            <h3 style='color:#1f2937; margin-bottom:12px;'>📋 Detailed Metrics</h3>
-            <pre style='background:#1e293b; color:#f8fafc; border:1px solid #334155; padding:20px; border-radius:12px; overflow-x:auto; font-size:13px; line-height:1.5;'>
-{json.dumps(results, indent=2)}
-            </pre>
 
             <div style='text-align:center; margin-top:32px; padding-top:24px; border-top:1px solid #e1e4e8;'>
                 <p style='color:#94a3b8; font-size:12px; margin:0;'>
@@ -399,6 +400,7 @@ if "S" not in st.session_state:
         "results": {},
         "unsup_labels": None,
         "preprocessing_steps": [],
+        "chat_history": [],
     }
 S = st.session_state.S
 
@@ -426,13 +428,14 @@ with st.sidebar:
     st.subheader("🧭 Navigation")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "preprocess", "train", "playground", "unsupervised", "chat", "results", "deployment", "help"]
     nav_labels = {
         "dashboard":"📁 Dashboard",
         "preprocess":"🧹 Preprocess",
         "train":"🧠 Train (Supervised)",
         "playground":"🎨 Playground",
         "unsupervised":"🧩 Unsupervised",
+        "chat":"💬 Chat (AI)",
         "results":"📊 Results",
         "deployment":"🚀 Deployment",
         "help":"❓ Help"
@@ -588,6 +591,20 @@ elif S["page"] == "preprocess":
     
     df = S["df"].copy()
     steps_applied = []
+
+    # AI Preprocessing Suggestions
+    if TRANSFORMERS_OK:
+        with st.expander("✨ AI Preprocessing Suggestions", expanded=False):
+            if st.button("🤖 Get AI Suggestions"):
+                with st.spinner("Analyzing data patterns..."):
+                    try:
+                        summary = df.describe(include='all').iloc[:, :10].to_string() # Limit to 10 cols for prompt
+                        prompt = f"Data Summary: {summary}\nSuggest 3 preprocessing steps for this dataset for a {S['task']} task."
+                        generator = get_ai_pipeline()
+                        suggestions = generator(prompt, max_length=150)[0]['generated_text']
+                        st.markdown(f"<div class='success-box'>{suggestions.replace(prompt, '').strip()}</div>", unsafe_allow_html=True)
+                    except Exception as e:
+                        st.error(f"AI Suggestions failed: {e}")
     
     # 1. Missing Values
     with st.expander("1️⃣ Handle Missing Values", expanded=True):
@@ -860,7 +877,14 @@ elif S["page"] == "train":
                     if cell['cell_type'] == 'code' and 'task_type =' in cell['source'][0]:
                         cell['source'] = [
                             f"target_column = '{S['target']}' # @param {{type:\"string\"}}\n",
-                            f"task_type = '{S['task'].lower()}' # @param [\"classification\", \"regression\"]\n"
+                            f"task_type = '{S['task'].lower()}' # @param [\"classification\", \"regression\"]\n",
+                            "run_eda = True # @param {type:\"boolean\"}\n"
+                        ]
+                    if cell['cell_type'] == 'code' and 'recipient_email =' in cell['source'][0]:
+                         cell['source'] = [
+                            f"recipient_email = \"{S.get('user_email', '')}\" # @param {{type:\"string\"}}\n",
+                            "sender_email = \"\" # @param {type:\"string\"}\n",
+                            "sender_password = \"\" # @param {type:\"string\"}\n"
                         ]
 
                 notebook_str = json.dumps(template, indent=2)
@@ -1859,6 +1883,54 @@ elif S["page"] == "unsupervised":
         with st.expander("🔍 Error Details"):
             st.code(traceback.format_exc())
 
+# ===================== CHAT =====================
+elif S["page"] == "chat":
+    st.title("💬 Chat with your Data (AI)")
+
+    if S["df"] is None:
+        st.info("📁 Upload a dataset first from the Dashboard.")
+        st.stop()
+
+    if not TRANSFORMERS_OK:
+        st.error("📦 Transformers library not available.")
+        st.stop()
+
+    st.markdown("""
+    <div class='card'>
+        <h4>🤖 Local AI Assistant</h4>
+        <p class='small'>Ask questions about your data. Powered by <code>distilgpt2</code> running locally in your browser session.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    # Display chat history
+    for message in S["chat_history"]:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
+
+    if prompt := st.chat_input("Ask something about your dataset..."):
+        S["chat_history"].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    # Prepare context
+                    cols = ", ".join(S["df"].columns)
+                    context = f"The dataset has columns: {cols}. User asked: {prompt}"
+
+                    generator = get_ai_pipeline()
+                    response = generator(context, max_length=100, num_return_sequences=1)[0]['generated_text']
+
+                    answer = response.replace(context, "").strip()
+                    if not answer:
+                        answer = "I'm analyzing the data. Could you please be more specific?"
+
+                    st.markdown(answer)
+                    S["chat_history"].append({"role": "assistant", "content": answer})
+                except Exception as e:
+                    st.error(f"Chat failed: {e}")
+
 # ===================== RESULTS =====================
 elif S["page"] == "results":
     st.title("📊 Results & Reports")
@@ -2010,6 +2082,18 @@ elif S["page"] == "results":
         mime="application/json"
     )
 
+    if S["model"] is not None:
+        try:
+            model_pkl = pickle.dumps(S["model"])
+            st.download_button(
+                label="📥 Download Model (.pkl)",
+                data=model_pkl,
+                file_name=f"model_{results.get('model', 'model')}.pkl",
+                mime="application/octet-stream"
+            )
+        except Exception as e:
+            st.error(f"Could not export model: {e}")
+
 # ===================== DEPLOYMENT =====================
 elif S["page"] == "deployment":
     st.title("🚀 Model Deployment & Inference")
@@ -2021,29 +2105,44 @@ elif S["page"] == "deployment":
         st.markdown("#### 📤 Upload Model")
         uploaded_model = st.file_uploader("Upload .pkl model file", type=["pkl"])
 
+        st.markdown("#### 🔗 Import from URL")
+        model_url = st.text_input("Direct URL to .pkl file")
+
+        model = None
         if uploaded_model is not None:
             try:
-                # Load the model
-                # PyCaret models often need joblib or special load
                 model = joblib.load(uploaded_model)
-                st.success("✅ Model loaded successfully!")
-
-                # Check if we have feature info
-                if hasattr(model, 'feature_names_in_'):
-                    features = list(model.feature_names_in_)
-                elif S.get("final_cols"):
-                    features = S["final_cols"]
-                else:
-                    st.warning("⚠️ Could not detect feature names from model. Using original dataset columns if available.")
-                    if S["df"] is not None:
-                        features = [c for c in S["df"].columns if c != S.get("target")]
-                    else:
-                        features = []
+                st.success("✅ Model loaded from file!")
             except Exception as e:
-                st.error(f"❌ Failed to load model: {str(e)}")
-                model = None
-        else:
-            model = None
+                st.error(f"❌ Upload failed: {e}")
+        elif model_url:
+            try:
+                import requests
+                from io import BytesIO
+                resp = requests.get(model_url)
+                model = joblib.load(BytesIO(resp.content))
+                st.success("✅ Model imported from URL!")
+            except Exception as e:
+                st.error(f"❌ URL import failed: {e}")
+        elif S["model"] is not None:
+            model = S["model"]
+            st.info("✅ Using model from current session")
+
+        if model is not None:
+            # Security warning for joblib
+            st.warning("⚠️ Loading models from untrusted sources can execute arbitrary code.")
+
+            # Check if we have feature info
+            if hasattr(model, 'feature_names_in_'):
+                features = list(model.feature_names_in_)
+            elif S.get("final_cols"):
+                features = S["final_cols"]
+            else:
+                st.warning("⚠️ Could not detect feature names from model. Using original dataset columns if available.")
+                if S["df"] is not None:
+                    features = [c for c in S["df"].columns if c != S.get("target")]
+                else:
+                    features = []
 
     with col2:
         if model is not None and features:
@@ -2067,7 +2166,17 @@ elif S["page"] == "deployment":
 
             if st.button("✨ Predict"):
                 try:
-                    input_df = pd.DataFrame([input_data])
+                    # Apply label encoding to categorical inputs
+                    processed_input = input_data.copy()
+                    for col, encoder in S.get("label_encoders", {}).items():
+                        if col in processed_input:
+                            try:
+                                processed_input[col] = encoder.transform([str(processed_input[col])])[0]
+                            except:
+                                pass # Fallback if value not in encoder
+
+                    input_df = pd.DataFrame([processed_input])
+
                     # If it's a PyCaret model, we might need to use predict_model
                     if 'pycaret' in str(type(model)):
                         from pycaret.classification import predict_model as cls_pred
@@ -2097,8 +2206,24 @@ elif S["page"] == "deployment":
 elif S["page"] == "help":
     st.title("❓ Help & Documentation")
     
+    # Interactive Guide
+    st.markdown("### 🚀 Interactive Quick Start")
+    step = st.select_slider(
+        "Choose a step to learn more:",
+        options=["Upload", "Preprocess", "Train", "Deploy"],
+        value="Upload"
+    )
+
+    guides = {
+        "Upload": "Go to the **Dashboard** and upload a CSV file. Check the preview to ensure data looks correct.",
+        "Preprocess": "Use the **Preprocess** tab to handle missing values, outliers, and scale your features.",
+        "Train": "Select your target in the **Train** tab and choose a model. Click 'Train Model' to see results.",
+        "Deploy": "Download your model from **Results** or test it immediately in the **Deployment** tab."
+    }
+    st.info(f"💡 {guides[step]}")
+
     st.markdown("""
-    ## 🚀 Quick Start Guide
+    ## 📚 Detailed Documentation
     
     ### 1. Upload Data (**Dashboard**)
     - Upload a **CSV** file.
