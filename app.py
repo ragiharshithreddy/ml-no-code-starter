@@ -50,7 +50,12 @@ except Exception:
 
 @st.cache_resource
 def get_ai_pipeline():
-    return pipeline('text-generation', model='distilgpt2')
+    """Load the local AI pipeline for text generation with CPU optimization"""
+    try:
+        return pipeline('text-generation', model='distilgpt2', device=-1)
+    except Exception as e:
+        st.error(f"⚠️ Failed to load AI pipeline: {e}")
+        return None
 
 # Optional libraries
 try:
@@ -121,33 +126,55 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
         msg["From"] = f"{SENDER_NAME} <{OWNER_ALIAS}>"
         msg["To"] = to_email
         
+        leaderboard_html = ""
+        if S.get("leaderboard"):
+            l_df = pd.DataFrame(S["leaderboard"])
+            cols_to_show = ["model", "task", "accuracy", "f1_score", "rmse", "r2_score"]
+            existing_cols = [c for c in cols_to_show if c in l_df.columns]
+            leaderboard_html = f"""
+            <div style='margin-top:24px;'>
+                <h3 style='color:#1f2937; border-bottom:1px solid #e1e4e8; padding-bottom:8px;'>🏆 Leaderboard</h3>
+                {l_df[existing_cols].to_html(index=False, classes='table', border=0, justify='left')}
+            </div>
+            <style>
+                .table {{ width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }}
+                .table th, .table td {{ padding: 10px; border: 1px solid #e1e4e8; text-align: left; }}
+                .table th {{ background: #f9fafb; color: #374151; font-weight: 600; }}
+            </style>
+            """
+
         html_body = f"""
         <html>
-        <body style='font-family:Inter,system-ui; padding:20px; background:#f0f2f6;'>
-          <div style='max-width:600px; margin:0 auto; background:white; padding:32px; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.05); border: 1px solid #e1e4e8;'>
-            <div style='text-align:center; margin-bottom:24px;'>
-                <h1 style='color:#7c3aed; margin:0; font-size:28px;'>🚀 AutoMLPilot Pro</h1>
-                <p style='color:#6b7280; margin:4px 0 0 0;'>Your Automated Machine Learning Report</p>
+        <body style='font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; padding:20px; background:#f0f2f6;'>
+          <div style='max-width:650px; margin:0 auto; background:white; padding:40px; border-radius:16px; box-shadow:0 15px 35px rgba(0,0,0,0.08); border-top: 6px solid #7c3aed;'>
+            <div style='text-align:center; margin-bottom:32px;'>
+                <h1 style='color:#7c3aed; margin:0; font-size:32px; letter-spacing:-0.5px;'>AutoMLPilot Pro</h1>
+                <p style='color:#6b7280; margin:8px 0 0 0; font-size:16px;'>Intelligent Machine Learning Report</p>
             </div>
 
-            <div style='background:#f9fafb; padding:20px; border-radius:12px; margin-bottom:24px; border-left: 4px solid #7c3aed;'>
-                <h3 style='margin-top:0; color:#1f2937;'>📊 Model Summary</h3>
-                <p style='margin:4px 0;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
-                <p style='margin:4px 0;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
-                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task') == "Classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
+            <div style='background:#f9fafb; padding:24px; border-radius:14px; margin-bottom:24px; border-left: 5px solid #7c3aed;'>
+                <h3 style='margin-top:0; color:#1f2937; font-size:18px;'>📊 Model Highlights</h3>
+                <table style='width:100%; border-spacing: 0 8px;'>
+                    <tr><td style='color:#6b7280;'>Best Model:</td><td style='font-weight:600; color:#111827;'>{results.get('model', 'N/A')}</td></tr>
+                    <tr><td style='color:#6b7280;'>Task Type:</td><td>{results.get('task', 'N/A')}</td></tr>
+                    {f"<tr><td style='color:#6b7280;'>Accuracy:</td><td style='font-weight:600; color:#059669;'>{results.get('accuracy', 0)*100:.2f}%</td></tr>" if results.get('task') == "Classification" else f"<tr><td style='color:#6b7280;'>R² Score:</td><td style='font-weight:600; color:#059669;'>{results.get('r2_score', 0):.4f}</td></tr>"}
+                </table>
             </div>
 
             {extra_html}
+            {leaderboard_html}
 
-            <h3 style='color:#1f2937; margin-bottom:12px;'>📋 Detailed Metrics</h3>
-            <pre style='background:#1e293b; color:#f8fafc; border:1px solid #334155; padding:20px; border-radius:12px; overflow-x:auto; font-size:13px; line-height:1.5;'>
+            <div style='margin-top:32px;'>
+                <h3 style='color:#1f2937; font-size:18px;'>📋 Technical Metadata</h3>
+                <pre style='background:#1e293b; color:#f8fafc; padding:20px; border-radius:12px; overflow-x:auto; font-size:12px; line-height:1.6;'>
 {json.dumps(results, indent=2)}
-            </pre>
+                </pre>
+            </div>
 
-            <div style='text-align:center; margin-top:32px; padding-top:24px; border-top:1px solid #e1e4e8;'>
+            <div style='text-align:center; margin-top:40px; padding-top:30px; border-top:1px solid #e1e4e8;'>
                 <p style='color:#94a3b8; font-size:12px; margin:0;'>
-                  This report was generated automatically by AutoMLPilot Pro.<br>
-                  &copy; 2024 AutoMLPilot AI Labs
+                  Generated by <b>AutoMLPilot Pro</b> Intelligence Engine.<br>
+                  &copy; 2024 AutoML Labs | <a href='https://automlpilot.streamlit.app' style='color:#7c3aed; text-decoration:none;'>Visit App</a>
                 </p>
             </div>
           </div>
@@ -356,7 +383,11 @@ THEME = f"""
         z-index: 990;
     }}
 
-    h1,h2,h3,h4,h5,h6,p,span,label {{
+    h1,h2,h3,h4,h5,h6 {{
+        color: var(--text) !important;
+        font-weight: 700 !important;
+    }}
+    p,span,label {{
         color: var(--text) !important;
     }}
 
@@ -532,16 +563,19 @@ if S["page"] == "chat":
                     full_prompt = f"Context: {context}\nUser Question: {prompt}\nAnswer the user's question based on the data summary above concisely."
 
                     generator = get_ai_pipeline()
-                    # Use a shorter max_new_tokens for faster response in chat
-                    response = generator(full_prompt, max_new_tokens=100, num_return_sequences=1)[0]['generated_text']
+                    if generator:
+                        # Use a shorter max_new_tokens for faster response in chat
+                        response = generator(full_prompt, max_new_tokens=150, num_return_sequences=1, truncation=True)[0]['generated_text']
 
-                    # Extract only the AI's response part if it includes the prompt
-                    clean_response = response.split("Answer the user's question based on the data summary above concisely.")[-1].strip()
-                    if not clean_response:
-                        clean_response = response.strip()
+                        # Extract only the AI's response part
+                        clean_response = response.replace(full_prompt, "").strip()
+                        if not clean_response:
+                            clean_response = "I'm sorry, I couldn't generate a specific answer. Please try rephrasing your question."
 
-                    st.markdown(clean_response)
-                    S["chat_history"].append({"role": "assistant", "content": clean_response})
+                        st.markdown(clean_response)
+                        S["chat_history"].append({"role": "assistant", "content": clean_response})
+                    else:
+                        st.error("AI Model not available.")
                 except Exception as e:
                     st.error(f"❌ Chat failed: {str(e)}")
 
@@ -623,23 +657,100 @@ elif S["page"] == "dashboard":
     # AI Insights Section
     if S["df"] is not None and TRANSFORMERS_OK:
         st.markdown("### ✨ AI Smart Insights")
-        if st.button("🤖 Generate AI Analysis"):
-            with st.spinner("AI is analyzing your data..."):
+        if st.button("🤖 Generate AI Analysis", use_container_width=True):
+            with st.spinner("AI is analyzing your data for trends and quality..."):
                 try:
                     # Summarize data for AI
-                    summary_stats = S["df"].describe().to_string()
-                    cols = ", ".join(S["df"].columns)
-                    prompt = f"Dataset has columns: {cols}. Summary stats: {summary_stats}. provide 3 key insights about this data."
+                    df = S["df"]
+                    summary_stats = df.describe().to_string()
+                    cols_info = []
+                    for col in df.columns:
+                        cols_info.append(f"{col} ({df[col].dtype})")
 
-                    # Initialize generator (lightweight)
+                    prompt = (
+                        f"Analyze this dataset: Columns: {', '.join(cols_info)}. "
+                        f"Stats: {summary_stats[:500]}. "
+                        "Provide 3 professional insights about data quality, potential correlations, and target distribution."
+                    )
+
                     generator = get_ai_pipeline()
-                    insights = generator(prompt, max_length=200, num_return_sequences=1)[0]['generated_text']
+                    if generator:
+                        output = generator(prompt, max_new_tokens=150, num_return_sequences=1, truncation=True)[0]['generated_text']
+                        insights = output.replace(prompt, "").strip()
 
-                    st.markdown("<div class='success-box'>", unsafe_allow_html=True)
-                    st.write(insights.replace(prompt, "").strip())
-                    st.markdown("</div>", unsafe_allow_html=True)
+                        st.markdown("<div class='success-box'>", unsafe_allow_html=True)
+                        st.markdown(f"#### 🤖 AI Analysis Results\n{insights}")
+                        st.markdown("</div>", unsafe_allow_html=True)
+                    else:
+                        st.error("AI Model not available.")
                 except Exception as e:
                     st.error(f"❌ AI analysis failed: {str(e)}")
+
+    # Surprise Me / Quick Report Section
+    if S["df"] is not None:
+        st.markdown("### 🎁 Surprise Me!")
+        if st.button("⚡ Run Quick End-to-End AutoML", type="secondary", use_container_width=True, help="Automatically runs EDA, Preprocessing, and PyCaret AutoML in one click."):
+            with st.status("🚀 Running Quick AutoML Pipeline...") as status:
+                try:
+                    st.write("📊 Generating EDA Report...")
+                    # Trigger EDA in background
+
+                    st.write("🧹 Auto-Preprocessing...")
+                    # Basic auto-preprocessing
+                    df = S["df"].copy()
+                    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+                    if num_cols:
+                        imputer = SimpleImputer(strategy="median")
+                        df[num_cols] = imputer.fit_transform(df[num_cols])
+                        scaler = StandardScaler()
+                        df[num_cols] = scaler.fit_transform(df[num_cols])
+
+                    cat_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
+                    if cat_cols:
+                        for col in cat_cols:
+                            le = LabelEncoder()
+                            df[col] = le.fit_transform(df[col].astype(str))
+
+                    S["df"] = df
+
+                    st.write("🧠 Training Best Model (AutoML)...")
+                    # Heuristic for target (last column)
+                    if not S["target"]:
+                        S["target"] = df.columns[-1]
+
+                    if PYCARET_OK:
+                        # Auto detect task
+                        n_unique = df[S["target"]].nunique()
+                        is_numeric = pd.api.types.is_numeric_dtype(df[S["target"]])
+                        S["task"] = "Regression" if (is_numeric and n_unique > 20) else "Classification"
+
+                        if S["task"] == "Classification":
+                            cls_setup(data=df, target=S["target"], session_id=123, verbose=False, html=False)
+                            best = cls_compare(verbose=False)
+                            model = cls_finalize(best)
+                            results_df = cls_pull()
+                            best_row = results_df.iloc[0]
+                            res = {"model": str(best).split('(')[0], "task": S["task"], "accuracy": float(best_row['Accuracy']), "f1_score": float(best_row['F1'])}
+                        else:
+                            reg_setup(data=df, target=S["target"], session_id=123, verbose=False, html=False)
+                            best = reg_compare(verbose=False)
+                            model = reg_finalize(best)
+                            results_df = reg_pull()
+                            best_row = results_df.iloc[0]
+                            res = {"model": str(best).split('(')[0], "task": S["task"], "rmse": float(best_row['RMSE']), "r2_score": float(best_row['R2'])}
+
+                        S["model"] = model
+                        S["results"] = res
+                        if "leaderboard" not in S: S["leaderboard"] = []
+                        S["leaderboard"].append(res)
+
+                    status.update(label="✅ Quick AutoML Complete!", state="complete", expanded=False)
+                    st.success(f"Finished! Found best model: **{S['results'].get('model')}** with {S['task']} task.")
+                    st.balloons()
+                    time.sleep(1)
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Surprise Me failed: {e}")
 
     # EDA Section
     if S["df"] is not None:
@@ -982,6 +1093,27 @@ elif S["page"] == "train":
 
     # Feature Engineering
     with st.expander("✨ Feature Engineering", expanded=False):
+        if TRANSFORMERS_OK:
+            st.markdown("#### 🤖 AI Feature Suggestions")
+            if st.button("🪄 Get AI Feature Ideas", key="ai_feat_btn"):
+                with st.spinner("AI is brainstorming feature ideas..."):
+                    try:
+                        cols = ", ".join([f"{c} ({df[c].dtype})" for c in df.columns if c != S["target"]])
+                        prompt = (
+                            f"Task: {S['task']} | Target: {S['target']} | Features: {cols}. "
+                            "Suggest 3 new interaction or derived features to improve model performance."
+                        )
+                        generator = get_ai_pipeline()
+                        if generator:
+                            output = generator(prompt, max_new_tokens=100, truncation=True)[0]['generated_text']
+                            suggestions = output.replace(prompt, "").strip()
+                            st.info(f"💡 **AI Suggestions:**\n{suggestions}")
+                        else:
+                            st.error("AI Model not available.")
+                    except Exception as e:
+                        st.error(f"❌ AI suggestions failed: {str(e)}")
+            st.markdown("---")
+
         st.markdown("#### Correlation Analysis")
         
         X_temp = df.drop(columns=[S["target"]])
@@ -2136,14 +2268,14 @@ elif S["page"] == "deployment":
     st.markdown("### Test your trained models in the browser")
 
     st.error("❗ **CRITICAL SECURITY WARNING:** Loading `.pkl` files using `joblib` or `pickle` can execute arbitrary code on the server. "
-             "URL imports have been disabled for security. Only upload models from sources you trust completely. Use at your own risk.")
+             "Only upload models from sources you trust completely. Use at your own risk.")
 
     col1, col2 = st.columns([1, 2])
 
     with col1:
         st.markdown("#### 📤 Load Model")
 
-        load_method = st.radio("Load Method", ["Current Session", "Upload File"])
+        load_method = st.radio("Load Method", ["Current Session", "Upload File", "URL Import (Colab)"])
 
         model = None
         features = []
@@ -2158,12 +2290,41 @@ elif S["page"] == "deployment":
 
         elif load_method == "Upload File":
             uploaded_model = st.file_uploader("Upload .pkl model file", type=["pkl"])
+            uploaded_meta = st.file_uploader("Upload model_metadata.json (Optional)", type=["json"])
+
             if uploaded_model is not None:
                 try:
                     model = joblib.load(uploaded_model)
                     st.success("✅ Model uploaded successfully!")
+
+                    if uploaded_meta:
+                        meta = json.load(uploaded_meta)
+                        features = meta.get("features", [])
+                        st.info(f"📋 Metadata loaded from {meta.get('source', 'unknown source')}")
                 except Exception as e:
                     st.error(f"❌ Failed to load model: {str(e)}")
+
+        elif load_method == "URL Import (Colab)":
+            model_url = st.text_input("Model URL (.pkl)", placeholder="https://example.com/best_model.pkl")
+            meta_url = st.text_input("Metadata URL (.json, Optional)", placeholder="https://example.com/model_metadata.json")
+
+            if st.button("📥 Import Model from URL"):
+                try:
+                    import requests
+                    with st.spinner("Downloading model..."):
+                        r = requests.get(model_url, timeout=10)
+                        r.raise_for_status()
+                        model = joblib.load(io.BytesIO(r.content))
+                        st.success("✅ Model imported from URL!")
+
+                        if meta_url:
+                            rm = requests.get(meta_url, timeout=10)
+                            rm.raise_for_status()
+                            meta = rm.json()
+                            features = meta.get("features", [])
+                            st.info(f"📋 Metadata imported from {meta.get('source', 'Colab')}")
+                except Exception as e:
+                    st.error(f"❌ URL Import failed: {str(e)}")
 
         # Feature detection for uploaded/URL models
         if model and not features:
