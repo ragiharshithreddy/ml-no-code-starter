@@ -49,6 +49,12 @@ try:
 except Exception:
     TRANSFORMERS_OK = False
 
+@st.cache_resource(show_spinner=False)
+def load_model_from_url(model_url):
+    response = requests.get(model_url)
+    response.raise_for_status()
+    return joblib.load(io.BytesIO(response.content))
+
 @st.cache_resource
 def get_ai_pipeline():
     return pipeline('text-generation', model='distilgpt2')
@@ -2170,9 +2176,7 @@ elif S["page"] == "deployment":
             if model_url:
                 try:
                     with st.spinner("Downloading model..."):
-                        response = requests.get(model_url)
-                        response.raise_for_status()
-                        model = joblib.load(io.BytesIO(response.content))
+                        model = load_model_from_url(model_url)
                         st.success("✅ Model imported from URL successfully!")
                 except Exception as e:
                     st.error(f"❌ Failed to import model: {str(e)}")
