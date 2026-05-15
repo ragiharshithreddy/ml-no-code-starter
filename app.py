@@ -239,15 +239,12 @@ def correlation_recommendations(df: pd.DataFrame, thresh=0.7):
             return []
         
         corr = num_df.corr()
-        recommendations = []
         
-        for i, col1 in enumerate(corr.columns):
-            for j, col2 in enumerate(corr.columns):
-                if j <= i:
-                    continue
-                val = corr.iloc[i, j]
-                if abs(val) >= thresh:
-                    recommendations.append((col1, col2, float(val)))
+        upper_tri = corr.where(np.triu(np.ones(corr.shape), k=1).astype(bool))
+        stacked = upper_tri.stack()
+        filtered = stacked[stacked.abs() >= thresh]
+
+        recommendations = [(idx[0], idx[1], float(val)) for idx, val in filtered.items()]
         
         return sorted(recommendations, key=lambda x: -abs(x[2]))[:15]
     except Exception as e:
