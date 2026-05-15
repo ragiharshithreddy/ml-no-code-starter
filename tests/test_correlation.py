@@ -56,25 +56,30 @@ class TestCorrelationRecommendations(unittest.TestCase):
 
     def test_happy_path(self):
         """Test with a dataframe having clear correlations."""
+        import sys
+        if 'pandas' in sys.modules and isinstance(sys.modules['pandas'], MagicMock):
+            del sys.modules['pandas']
+        if 'numpy' in sys.modules and isinstance(sys.modules['numpy'], MagicMock):
+            del sys.modules['numpy']
+
+        import pandas as pd
+        import numpy as np
+
         mock_df = MagicMock()
         mock_num_df = MagicMock()
-        mock_corr = MagicMock()
 
         mock_df.select_dtypes.return_value = mock_num_df
         mock_num_df.shape = (5, 3)
+
+        # We need a real pandas DataFrame for `corr.where` and `stack` to work correctly.
+        mock_corr = pd.DataFrame(
+            np.array([[1.0, 0.9, -0.8], [0.9, 1.0, 0.1], [-0.8, 0.1, 1.0]]),
+            columns=['A', 'B', 'C'], index=['A', 'B', 'C']
+        )
         mock_num_df.corr.return_value = mock_corr
 
-        mock_corr.columns = ['A', 'B', 'C']
-
-        # Mocking corr.iloc[i, j]
-        # matrix: A:B=0.9, A:C=-0.8, B:C=0.1
-        matrix = {
-            (0, 1): 0.9, (0, 2): -0.8,
-            (1, 0): 0.9, (1, 2): 0.1,
-            (2, 0): -0.8, (2, 1): 0.1,
-            (0, 0): 1.0, (1, 1): 1.0, (2, 2): 1.0
-        }
-        mock_corr.iloc.__getitem__.side_effect = lambda x: matrix.get(x, 0.0)
+        app.pd = pd
+        app.np = np
 
         results = correlation_recommendations(mock_df, thresh=0.7)
 
@@ -105,32 +110,57 @@ class TestCorrelationRecommendations(unittest.TestCase):
 
     def test_no_high_correlation(self):
         """Test when no features meet the threshold."""
+        import sys
+        if 'pandas' in sys.modules and isinstance(sys.modules['pandas'], MagicMock):
+            del sys.modules['pandas']
+        if 'numpy' in sys.modules and isinstance(sys.modules['numpy'], MagicMock):
+            del sys.modules['numpy']
+
+        import pandas as pd
+        import numpy as np
+
         mock_df = MagicMock()
         mock_num_df = MagicMock()
-        mock_corr = MagicMock()
 
         mock_df.select_dtypes.return_value = mock_num_df
         mock_num_df.shape = (5, 2)
+
+        mock_corr = pd.DataFrame(
+            np.array([[1.0, 0.5], [0.5, 1.0]]),
+            columns=['A', 'B'], index=['A', 'B']
+        )
         mock_num_df.corr.return_value = mock_corr
-        mock_corr.columns = ['A', 'B']
-        mock_corr.iloc.__getitem__.return_value = 0.5 # Below default 0.7
+
+        app.pd = pd
+        app.np = np
 
         results = correlation_recommendations(mock_df)
         self.assertEqual(results, [])
 
     def test_limit_15_results(self):
         """Test that it returns at most 15 recommendations."""
+        import sys
+        if 'pandas' in sys.modules and isinstance(sys.modules['pandas'], MagicMock):
+            del sys.modules['pandas']
+        if 'numpy' in sys.modules and isinstance(sys.modules['numpy'], MagicMock):
+            del sys.modules['numpy']
+
+        import pandas as pd
+        import numpy as np
+
         mock_df = MagicMock()
         mock_num_df = MagicMock()
-        mock_corr = MagicMock()
 
         mock_df.select_dtypes.return_value = mock_num_df
         mock_num_df.shape = (5, 20)
-        mock_num_df.corr.return_value = mock_corr
 
         cols = [f'col_{i}' for i in range(20)]
-        mock_corr.columns = cols
-        mock_corr.iloc.__getitem__.return_value = 0.9
+        mock_corr = pd.DataFrame(np.full((20, 20), 0.9), columns=cols, index=cols)
+        np.fill_diagonal(mock_corr.values, 1.0)
+        mock_num_df.corr.return_value = mock_corr
+
+        app.pd = pd
+        app.np = np
 
         results = correlation_recommendations(mock_df, thresh=0.5)
         # 20 columns -> 190 pairs. Should be limited to 15.
