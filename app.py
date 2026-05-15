@@ -41,7 +41,6 @@ warnings.filterwarnings('ignore')
 import pickle
 import joblib
 import io
-import requests
 
 try:
     from transformers import pipeline
@@ -2136,14 +2135,15 @@ elif S["page"] == "deployment":
     st.title("🚀 Model Deployment & Inference")
     st.markdown("### Test your trained models in the browser")
 
-    st.error("❗ **CRITICAL SECURITY WARNING:** Loading `.pkl` files using `joblib` or `pickle` can execute arbitrary code on the server. Never import models from untrusted sources or URLs. Use at your own risk.")
+    st.error("❗ **CRITICAL SECURITY WARNING:** Loading `.pkl` files using `joblib` or `pickle` can execute arbitrary code on the server. "
+             "URL imports have been disabled for security. Only upload models from sources you trust completely. Use at your own risk.")
 
     col1, col2 = st.columns([1, 2])
 
     with col1:
         st.markdown("#### 📤 Load Model")
 
-        load_method = st.radio("Load Method", ["Current Session", "Upload File", "Import from URL"])
+        load_method = st.radio("Load Method", ["Current Session", "Upload File"])
 
         model = None
         features = []
@@ -2164,18 +2164,6 @@ elif S["page"] == "deployment":
                     st.success("✅ Model uploaded successfully!")
                 except Exception as e:
                     st.error(f"❌ Failed to load model: {str(e)}")
-
-        elif load_method == "Import from URL":
-            model_url = st.text_input("Enter Model URL", placeholder="https://example.com/model.pkl")
-            if model_url:
-                try:
-                    with st.spinner("Downloading model..."):
-                        response = requests.get(model_url)
-                        response.raise_for_status()
-                        model = joblib.load(io.BytesIO(response.content))
-                        st.success("✅ Model imported from URL successfully!")
-                except Exception as e:
-                    st.error(f"❌ Failed to import model: {str(e)}")
 
         # Feature detection for uploaded/URL models
         if model and not features:
