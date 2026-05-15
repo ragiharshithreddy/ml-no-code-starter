@@ -209,7 +209,7 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
         html_body = f"""
         <html>
         <body style='font-family:Inter,system-ui; padding:20px; background:#f0f2f6;'>
-          <div style='max-width:600px; margin:0 auto; background:white; padding:32px; border-radius:16px; box-shadow:0 10px 25px rgba(0,0,0,0.05); border: 1px solid #e1e4e8;'>
+          <div style='max-width:600px; margin:0 auto; background:white; padding:32px; border-radius:4px; border: 1px solid #e1e4e8;'>
             <div style='text-align:center; margin-bottom:24px;'>
                 <h1 style='color:#7c3aed; margin:0; font-size:28px;'>🚀 AutoMLPilot Pro</h1>
                 <p style='color:#6b7280; margin:4px 0 0 0;'>Your Automated Machine Learning Report</p>
@@ -397,9 +397,7 @@ THEME = f"""
     }}
 
     .main {{
-        background: radial-gradient(1200px 600px at 10% 10%, var(--bg1), transparent),
-                radial-gradient(900px 500px at 90% 20%, var(--bg2), transparent),
-                linear-gradient(120deg, var(--bg1), var(--bg2));
+        background: var(--bg1);
     }}
 
     /* Fixed Layout Overrides */
@@ -424,13 +422,11 @@ THEME = f"""
         right: 0;
         z-index: 1000;
         height: 80px;
-        backdrop-filter: blur(12px);
-        background: { "rgba(15, 23, 42, 0.8)" if S.get("dark_mode") else "linear-gradient(90deg, rgba(255,255,255,0.9), rgba(255,255,255,0.7))" };
+        background: { "rgba(15, 23, 42, 0.8)" if S.get("dark_mode") else "rgba(255,255,255,0.9)" };
         border-bottom: 1px solid var(--border);
         padding: 0.6rem 2rem;
         display: flex;
         align-items: center;
-        box-shadow: 0 4px 12px rgba(0,0,0, .1);
     }}
 
     .stSidebar {{
@@ -448,15 +444,14 @@ THEME = f"""
     .card {{
         background: var(--card);
         border: 1px solid var(--border);
-        border-radius: 20px;
-        box-shadow: 0 12px 35px rgba(0,0,0,.12);
+        border-radius: 4px;
         padding: 16px;
     }}
 
     .metric {{
         background: { "rgba(30, 41, 59, 0.5)" if S.get("dark_mode") else "rgba(255,255,255,0.75)" };
         border-left: 4px solid var(--primary-color);
-        border-radius: 14px;
+        border-radius: 4px;
         padding: 12px;
         margin: 8px 0;
     }}
@@ -472,7 +467,7 @@ THEME = f"""
     }}
     [data-testid="stSidebarContent"] .stRadio label > div {{
         padding: 10px 15px;
-        border-radius: 999px;
+        border-radius: 4px;
         font-weight: 500;
         text-align: left;
         transition: all 0.2s ease;
@@ -487,7 +482,6 @@ THEME = f"""
         background: var(--primary-color) !important;
         color: white !important;
         border-color: var(--primary-color) !important;
-        box-shadow: 0 2px 5px rgba(124, 58, 237, 0.3);
     }}
     [data-testid="stSidebarContent"] .stRadio input:checked + div > div > div:first-child {{
         background-color: transparent !important;
@@ -496,8 +490,8 @@ THEME = f"""
         display: none !important;
     }}
 
-    .chip {{ display:inline-block; padding:.25rem .6rem; border-radius:999px; background:{ "#1e293b" if S.get("dark_mode") else "#eef2ff" }; color:{ "#818cf8" if S.get("dark_mode") else "#4338ca" }; border:1px solid { "#334155" if S.get("dark_mode") else "#c7d2fe" }; font-size:.8rem; }}
-    .pillbtn button {{ border-radius:999px !important; }}
+    .chip {{ display:inline-block; padding:.25rem .6rem; border-radius:4px; background:{ "#1e293b" if S.get("dark_mode") else "#eef2ff" }; color:{ "#818cf8" if S.get("dark_mode") else "#4338ca" }; border:1px solid { "#334155" if S.get("dark_mode") else "#c7d2fe" }; font-size:.8rem; }}
+    .pillbtn button {{ border-radius:4px !important; }}
     .small {{ color:{ "#94a3b8" if S.get("dark_mode") else "#475569" }; font-size:.85rem; }}
     .tooltip {{ color:{ "#64748b" if S.get("dark_mode") else "#6b7280" }; font-size:.85rem; }}
     .error-box {{ background:{ "#450a0a" if S.get("dark_mode") else "#fee" }; border-left:4px solid #dc2626; padding:12px; border-radius:8px; margin:8px 0; }}
