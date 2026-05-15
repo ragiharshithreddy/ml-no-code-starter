@@ -49,6 +49,10 @@ try:
 except Exception:
     TRANSFORMERS_OK = False
 
+@st.cache_data(show_spinner=False)
+def get_dataset_summary(df):
+    return df.describe(include='all').to_string()
+
 @st.cache_resource
 def get_ai_pipeline():
     return pipeline('text-generation', model='distilgpt2')
@@ -526,7 +530,7 @@ if S["page"] == "chat":
             with st.spinner("AI is thinking..."):
                 try:
                     # Basic data summary for context
-                    df_summary = S["df"].describe(include='all').to_string()
+                    df_summary = get_dataset_summary(S["df"])
                     cols = ", ".join(S["df"].columns)
                     context = f"The dataset has columns: {cols}. Here is a summary:\n{df_summary[:500]}..." # Truncate for prompt limits
 
@@ -680,7 +684,7 @@ elif S["page"] == "preprocess":
             if st.button("🤖 Get AI Suggestions"):
                 with st.spinner("AI is analyzing data distribution..."):
                     try:
-                        summary = df.describe(include='all').to_string()
+                        summary = get_dataset_summary(df)
                         prompt = f"Data Summary: {summary[:1000]}\nRecommend 3 preprocessing steps (imputation, scaling, or encoding) for this dataset."
                         generator = get_ai_pipeline()
                         suggestions = generator(prompt, max_new_tokens=100)[0]['generated_text']
