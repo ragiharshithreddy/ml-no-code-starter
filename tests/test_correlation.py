@@ -1,58 +1,70 @@
 import unittest
 from unittest.mock import MagicMock, patch
 import sys
+import importlib
 
-# Mock all dependencies to allow importing app.py without the actual packages
+# Mock dependencies to avoid pollution and allow app import
 mock_pd = MagicMock()
 mock_np = MagicMock()
-mock_np.number = "number" # So np.number works
+mock_np.number = "number"
 
-sys.modules["pandas"] = mock_pd
-sys.modules["numpy"] = mock_np
-sys.modules["streamlit"] = MagicMock()
-sys.modules["plotly"] = MagicMock()
-sys.modules["plotly.express"] = MagicMock()
-sys.modules["plotly.graph_objects"] = MagicMock()
-sys.modules["matplotlib"] = MagicMock()
-sys.modules["matplotlib.pyplot"] = MagicMock()
-sys.modules["seaborn"] = MagicMock()
-sys.modules["streamlit.components.v1"] = MagicMock()
-sys.modules["sklearn"] = MagicMock()
-sys.modules["sklearn.model_selection"] = MagicMock()
-sys.modules["sklearn.preprocessing"] = MagicMock()
-sys.modules["sklearn.feature_selection"] = MagicMock()
-sys.modules["sklearn.metrics"] = MagicMock()
-sys.modules["sklearn.decomposition"] = MagicMock()
-sys.modules["sklearn.impute"] = MagicMock()
-sys.modules["sklearn.neighbors"] = MagicMock()
-sys.modules["sklearn.svm"] = MagicMock()
-sys.modules["sklearn.ensemble"] = MagicMock()
-sys.modules["sklearn.linear_model"] = MagicMock()
-sys.modules["sklearn.naive_bayes"] = MagicMock()
-sys.modules["sklearn.tree"] = MagicMock()
-sys.modules["sklearn.neural_network"] = MagicMock()
-sys.modules["sklearn.cluster"] = MagicMock()
-sys.modules["sklearn.mixture"] = MagicMock()
-sys.modules["joblib"] = MagicMock()
-sys.modules["requests"] = MagicMock()
-sys.modules["ydata_profiling"] = MagicMock()
-sys.modules["xgboost"] = MagicMock()
-sys.modules["imblearn"] = MagicMock()
-sys.modules["imblearn.over_sampling"] = MagicMock()
-sys.modules["pycaret"] = MagicMock()
-sys.modules["pycaret.classification"] = MagicMock()
-sys.modules["pycaret.regression"] = MagicMock()
-sys.modules["transformers"] = MagicMock()
-
-# Now import the app and the function
-import app
-from app import correlation_recommendations
+# Create the dictionary of modules to mock
+modules_to_mock = {
+    "pandas": mock_pd,
+    "numpy": mock_np,
+    "streamlit": MagicMock(),
+    "plotly": MagicMock(),
+    "plotly.express": MagicMock(),
+    "plotly.graph_objects": MagicMock(),
+    "matplotlib": MagicMock(),
+    "matplotlib.pyplot": MagicMock(),
+    "seaborn": MagicMock(),
+    "streamlit.components.v1": MagicMock(),
+    "sklearn": MagicMock(),
+    "sklearn.model_selection": MagicMock(),
+    "sklearn.preprocessing": MagicMock(),
+    "sklearn.feature_selection": MagicMock(),
+    "sklearn.metrics": MagicMock(),
+    "sklearn.decomposition": MagicMock(),
+    "sklearn.impute": MagicMock(),
+    "sklearn.neighbors": MagicMock(),
+    "sklearn.svm": MagicMock(),
+    "sklearn.ensemble": MagicMock(),
+    "sklearn.linear_model": MagicMock(),
+    "sklearn.naive_bayes": MagicMock(),
+    "sklearn.tree": MagicMock(),
+    "sklearn.neural_network": MagicMock(),
+    "sklearn.cluster": MagicMock(),
+    "sklearn.mixture": MagicMock(),
+    "joblib": MagicMock(),
+    "requests": MagicMock(),
+    "ydata_profiling": MagicMock(),
+    "xgboost": MagicMock(),
+    "imblearn": MagicMock(),
+    "imblearn.over_sampling": MagicMock(),
+    "pycaret": MagicMock(),
+    "pycaret.classification": MagicMock(),
+    "pycaret.regression": MagicMock(),
+    "transformers": MagicMock()
+}
 
 class TestCorrelationRecommendations(unittest.TestCase):
 
     def setUp(self):
-        # Reset mocks before each test
-        app.st.error.reset_mock()
+        # We start the patcher for sys.modules
+        self.patcher = patch.dict('sys.modules', modules_to_mock)
+        self.patcher.start()
+
+        # Now we can safely import app
+        import app
+        self.app = app
+
+        # Reset st.error for each test
+        self.app.st.error.reset_mock()
+
+    def tearDown(self):
+        # Stop the patcher to clean up sys.modules
+        self.patcher.stop()
 
     def test_happy_path(self):
         """Test with a dataframe having clear correlations."""
@@ -76,7 +88,7 @@ class TestCorrelationRecommendations(unittest.TestCase):
         }
         mock_corr.iloc.__getitem__.side_effect = lambda x: matrix.get(x, 0.0)
 
-        results = correlation_recommendations(mock_df, thresh=0.7)
+        results = self.app.correlation_recommendations(mock_df, thresh=0.7)
 
         # Expected: (A, B, 0.9), (A, C, -0.8) sorted by abs value
         self.assertEqual(len(results), 2)
@@ -90,7 +102,7 @@ class TestCorrelationRecommendations(unittest.TestCase):
         mock_df.select_dtypes.return_value = mock_num_df
         mock_num_df.shape = (5, 0)
 
-        results = correlation_recommendations(mock_df)
+        results = self.app.correlation_recommendations(mock_df)
         self.assertEqual(results, [])
 
     def test_single_numeric_column(self):
@@ -100,7 +112,7 @@ class TestCorrelationRecommendations(unittest.TestCase):
         mock_df.select_dtypes.return_value = mock_num_df
         mock_num_df.shape = (5, 1)
 
-        results = correlation_recommendations(mock_df)
+        results = self.app.correlation_recommendations(mock_df)
         self.assertEqual(results, [])
 
     def test_no_high_correlation(self):
@@ -115,7 +127,7 @@ class TestCorrelationRecommendations(unittest.TestCase):
         mock_corr.columns = ['A', 'B']
         mock_corr.iloc.__getitem__.return_value = 0.5 # Below default 0.7
 
-        results = correlation_recommendations(mock_df)
+        results = self.app.correlation_recommendations(mock_df)
         self.assertEqual(results, [])
 
     def test_limit_15_results(self):
@@ -132,7 +144,7 @@ class TestCorrelationRecommendations(unittest.TestCase):
         mock_corr.columns = cols
         mock_corr.iloc.__getitem__.return_value = 0.9
 
-        results = correlation_recommendations(mock_df, thresh=0.5)
+        results = self.app.correlation_recommendations(mock_df, thresh=0.5)
         # 20 columns -> 190 pairs. Should be limited to 15.
         self.assertEqual(len(results), 15)
 
@@ -141,10 +153,10 @@ class TestCorrelationRecommendations(unittest.TestCase):
         mock_df = MagicMock()
         mock_df.select_dtypes.side_effect = Exception("Analysis Error")
 
-        results = correlation_recommendations(mock_df)
+        results = self.app.correlation_recommendations(mock_df)
         self.assertEqual(results, [])
-        app.st.error.assert_called()
-        self.assertIn("Analysis Error", app.st.error.call_args[0][0])
+        self.app.st.error.assert_called()
+        self.assertIn("Analysis Error", self.app.st.error.call_args[0][0])
 
 if __name__ == '__main__':
     unittest.main()
