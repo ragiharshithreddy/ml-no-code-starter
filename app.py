@@ -5,6 +5,7 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
+import logging
 import plotly.express as px
 import plotly.graph_objects as go
 import matplotlib.pyplot as plt
@@ -2219,9 +2220,9 @@ elif S["page"] == "deployment":
                         if col in input_df.columns:
                             try:
                                 input_df[col] = encoder.transform(input_df[col].astype(str))
-                            except Exception:
+                            except Exception as e:
                                 # If value not seen before, we might have issues, but let's try
-                                pass
+                                logging.warning(f"Could not encode column '{col}': {str(e)}")
 
                     # If it's a PyCaret model, we might need to use predict_model
                     if 'pycaret' in str(type(model)):
