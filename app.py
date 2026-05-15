@@ -635,9 +635,7 @@ elif S["page"] == "dashboard":
                     generator = get_ai_pipeline()
                     insights = generator(prompt, max_length=200, num_return_sequences=1)[0]['generated_text']
 
-                    st.markdown("<div class='success-box'>", unsafe_allow_html=True)
-                    st.write(insights.replace(prompt, "").strip())
-                    st.markdown("</div>", unsafe_allow_html=True)
+                    st.success(insights.replace(prompt, "").strip())
                 except Exception as e:
                     st.error(f"❌ AI analysis failed: {str(e)}")
 
@@ -2224,11 +2222,7 @@ elif S["page"] == "deployment":
                     else:
                         prediction = model.predict(input_df)[0]
 
-                    st.markdown(f"""
-                    <div class='success-box' style='font-size:1.5rem; text-align:center;'>
-                        Prediction: <strong>{prediction}</strong>
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.success(f"Prediction: **{prediction}**")
                 except Exception as e:
                     st.error(f"❌ Prediction failed: {str(e)}")
         elif model is not None:
