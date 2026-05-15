@@ -73,8 +73,8 @@ except Exception:
     IMB_OK = False
 
 try:
-    from pycaret.classification import setup as cls_setup, compare_models as cls_compare, pull as cls_pull, finalize_model as cls_finalize, save_model as cls_save
-    from pycaret.regression import setup as reg_setup, compare_models as reg_compare, pull as reg_pull, finalize_model as reg_finalize, save_model as reg_save
+    from pycaret.classification import setup as cls_setup, compare_models as cls_compare, pull as cls_pull, finalize_model as cls_finalize
+    from pycaret.regression import setup as reg_setup, compare_models as reg_compare, pull as reg_pull, finalize_model as reg_finalize
     PYCARET_OK = True
 except Exception:
     PYCARET_OK = False
