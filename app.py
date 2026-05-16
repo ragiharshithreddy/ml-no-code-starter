@@ -68,6 +68,13 @@ try:
 except Exception:
     PYCARET_OK = False
 
+try:
+    from transformers import pipeline
+    import torch
+    TRANSFORMERS_OK = True
+except Exception:
+    TRANSFORMERS_OK = False
+
 import smtplib
 import ssl
 import json
@@ -95,6 +102,14 @@ if ENABLE_EMAIL and (not OWNER_GMAIL or not OWNER_APP_PASSWORD):
 import zipfile
 from PIL import Image
 import json
+
+@st.cache_resource
+def get_ai_pipeline():
+    """Load a lightweight transformer for data insights"""
+    try:
+        return pipeline("text-generation", model="distilgpt2", device=-1) # CPU only
+    except Exception:
+        return None
 
 def process_zip_images(uploaded_zip):
     processed_images = []
@@ -126,7 +141,7 @@ def render_dashboard():
         st.metric(label="Temp", value="68°C", delta="+2°C", delta_color="inverse")
     st.markdown("---")
 
-def generate_colab_notebook(task, model_name):
+def generate_colab_notebook(task, target, email=""):
     notebook = {
         "cells": [
             {
@@ -139,38 +154,74 @@ def generate_colab_notebook(task, model_name):
             },
             {
                 "cell_type": "code",
-                "execution_count": None,
                 "metadata": {},
-                "outputs": [],
                 "source": [
-                    "!pip install pandas scikit-learn xgboost pycaret\n",
-                    "import pandas as pd\n",
-                    "print('Dependencies installed successfully!')"
+                    "# @title 1. Install Dependencies\n",
+                    "!pip install -q pycaret[full] ydata-profiling pandas jinja2\n",
+                    "print('✅ Dependencies installed!')"
                 ]
             },
             {
                 "cell_type": "code",
-                "execution_count": None,
                 "metadata": {},
-                "outputs": [],
                 "source": [
-                    "# Upload your CSV file here\n",
+                    "# @title 2. Load Dataset\n",
+                    "import pandas as pd\n",
                     "from google.colab import files\n",
                     "uploaded = files.upload()\n",
                     "filename = list(uploaded.keys())[0]\n",
                     "df = pd.read_csv(filename)\n",
-                    "print(df.head())"
+                    "print(f'✅ Loaded {filename}')"
                 ]
             },
             {
                 "cell_type": "code",
-                "execution_count": None,
                 "metadata": {},
-                "outputs": [],
                 "source": [
-                    f"# Setup and Train {model_name} for {task}\n",
-                    "# (Insert your custom training logic or PyCaret setup here)\n",
-                    "print('Training complete! Download the model using files.download()')"
+                    "# @title 3. AutoML Training\n",
+                    f"target_column = '{target}'\n",
+                    f"task_type = '{task.lower()}'\n",
+                    "\n",
+                    "if task_type == 'classification':\n",
+                    "    from pycaret.classification import setup, compare_models, finalize_model, save_model, pull\n",
+                    "    setup(data=df, target=target_column, session_id=123, verbose=False)\n",
+                    "else:\n",
+                    "    from pycaret.regression import setup, compare_models, finalize_model, save_model, pull\n",
+                    "    setup(data=df, target=target_column, session_id=123, verbose=False)\n",
+                    "\n",
+                    "best_model = compare_models()\n",
+                    "results = pull()\n",
+                    "final_model = finalize_model(best_model)\n",
+                    "save_model(final_model, 'best_model')\n",
+                    "display(results.head())"
+                ]
+            },
+            {
+                "cell_type": "code",
+                "metadata": {},
+                "source": [
+                    "# @title 4. Email Results & Download\n",
+                    "import smtplib, ssl\n",
+                    "from email.mime.text import MIMEText\n",
+                    "from email.mime.multipart import MIMEMultipart\n",
+                    "\n",
+                    f"recipient_email = '{email}' # @param {{type:'string'}}\n",
+                    "sender_email = '' # @param {{type:'string'}}\n",
+                    "sender_password = '' # @param {{type:'string'}}\n",
+                    "\n",
+                    "if recipient_email and sender_email and sender_password:\n",
+                    "    msg = MIMEMultipart()\n",
+                    "    msg['Subject'] = 'AutoMLPilot Colab Report'\n",
+                    "    msg['From'] = sender_email\n",
+                    "    msg['To'] = recipient_email\n",
+                    "    html = f'<h3>Results</h3>' + results.head().to_html()\n",
+                    "    msg.attach(MIMEText(html, 'html'))\n",
+                    "    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:\n",
+                    "        server.login(sender_email, sender_password)\n",
+                    "        server.sendmail(sender_email, recipient_email, msg.as_string())\n",
+                    "    print('✅ Email sent!')\n",
+                    "\n",
+                    "files.download('best_model.pkl')"
                 ]
             }
         ],
@@ -742,7 +793,83 @@ elif S["page"] == "dashboard":
     # EDA Section
     if S["df"] is not None:
         st.markdown("### 📊 Exploratory Data Analysis")
-        
+
+        # Surprise Me (Quick AutoML)
+        if st.button("✨ Surprise Me (Quick AutoML)", use_container_width=True):
+            with st.spinner("Running end-to-end AutoML magic..."):
+                try:
+                    # 1. Basic Preprocessing
+                    df = S["df"].copy()
+
+                    # Auto-detect target (last column)
+                    target = df.columns[-1]
+                    S["target"] = target
+
+                    # Simple imputation
+                    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+                    if num_cols:
+                        df[num_cols] = df[num_cols].fillna(df[num_cols].median())
+                    cat_cols = df.select_dtypes(exclude=[np.number]).columns.tolist()
+                    if cat_cols:
+                        df[cat_cols] = df[cat_cols].fillna(df[cat_cols].mode().iloc[0])
+
+                    # Auto-detect task
+                    n_unique = df[target].nunique()
+                    is_numeric = pd.api.types.is_numeric_dtype(df[target])
+                    task = "Regression" if (is_numeric and n_unique > 20) else "Classification"
+                    S["task"] = task
+
+                    # 2. PyCaret Training
+                    if PYCARET_OK:
+                        if task == "Classification":
+                            cls_setup(data=df, target=target, session_id=123, verbose=False, html=False)
+                            best = cls_compare(n_select=1, verbose=False)
+                            model = cls_finalize(best)
+                            results_df = cls_pull()
+                            res = {
+                                "model": str(best).split('(')[0],
+                                "task": task,
+                                "accuracy": round(float(results_df.iloc[0]['Accuracy']), 4),
+                                "f1_score": round(float(results_df.iloc[0]['F1']), 4)
+                            }
+                        else:
+                            reg_setup(data=df, target=target, session_id=123, verbose=False, html=False)
+                            best = reg_compare(n_select=1, verbose=False)
+                            model = reg_finalize(best)
+                            results_df = reg_pull()
+                            res = {
+                                "model": str(best).split('(')[0],
+                                "task": task,
+                                "rmse": round(float(results_df.iloc[0]['RMSE']), 4),
+                                "r2_score": round(float(results_df.iloc[0]['R2']), 4)
+                            }
+
+                        S["model"] = model
+                        S["results"] = res
+                        S["df"] = df
+                        S["final_cols"] = [c for c in df.columns if c != target]
+                        if "leaderboard" not in S: S["leaderboard"] = []
+                        S["leaderboard"].append(res)
+
+                        st.balloons()
+                        st.success(f"🚀 Quick AutoML complete! Best model: **{res['model']}**")
+
+                        # Send email if configured
+                        if ENABLE_EMAIL and S.get("user_email"):
+                            with st.spinner("📧 Sending results email..."):
+                                send_results_email(
+                                    to_email=S["user_email"],
+                                    subject=f"AutoMLPilot Surprise Me Results - {res['model']}",
+                                    results=res,
+                                    extra_html="<p>This was an automated <strong>'Surprise Me'</strong> training run.</p>"
+                                )
+
+                        st.info("Check the Results tab for more details.")
+                    else:
+                        st.error("❌ PyCaret not available for Quick AutoML.")
+                except Exception as e:
+                    st.error(f"❌ Surprise Me failed: {str(e)}")
+
         if st.button("🔍 Generate Full EDA Report", type="primary"):
             with st.spinner("Generating comprehensive report..."):
                 try:
@@ -1049,26 +1176,7 @@ elif S["page"] == "train":
 
         if st.button("📓 Generate Notebook"):
             try:
-                with open("notebooks/training_template.ipynb", "r") as f:
-                    template = json.load(f)
-
-                # Update template with current config
-                for cell in template['cells']:
-                    if cell['cell_type'] == 'code':
-                        source = "".join(cell['source'])
-                        if 'target_column =' in source and 'task_type =' in source:
-                            cell['source'] = [
-                                f"target_column = '{S['target']}' # @param {{type:\"string\"}}\n",
-                                f"task_type = '{S['task'].lower()}' # @param [\"classification\", \"regression\"]\n"
-                            ]
-                        elif 'recipient_email =' in source:
-                            cell['source'] = [
-                                f"recipient_email = '{S.get('user_email', '')}' # @param {{type:\"string\"}}\n",
-                                f"sender_email = '' # @param {{type:\"string\"}}\n",
-                                f"sender_password = '' # @param {{type:\"string\"}}\n"
-                            ]
-
-                notebook_str = json.dumps(template, indent=2)
+                notebook_str = generate_colab_notebook(S["task"], S["target"], S.get("user_email", ""))
                 st.download_button(
                     label="📥 Download Colab Notebook",
                     data=notebook_str,
@@ -1441,7 +1549,7 @@ elif S["page"] == "train":
     
     with colab_col1:
         # Colab Export logic available BEFORE training
-        colab_json = generate_colab_notebook(task, model_name if not use_pycaret else "pycaret_automl")
+        colab_json = generate_colab_notebook(task, S["target"], S.get("user_email", ""))
         st.download_button(
             label="📥 Export to Google Colab",
             data=colab_json,
@@ -1833,10 +1941,10 @@ elif S["page"] == "playground":
         with st.expander("🔍 Error Details"):
             st.code(traceback.format_exc())
 
-    if S.get("results") and S.get("task") and S.get("last_trained_model_name"):
+    if S.get("results") and S.get("task") and S.get("target"):
         st.markdown("### 📥 Export Training Setup")
         # Colab Export logic
-        colab_json = generate_colab_notebook(S["task"], S["last_trained_model_name"])
+        colab_json = generate_colab_notebook(S["task"], S["target"], S.get("user_email", ""))
         st.download_button(
             label="📥 Export to Google Colab",
             data=colab_json,
