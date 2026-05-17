@@ -11,3 +11,8 @@ xgboost
 seaborn
 kaleido
 pycaret
+transformers
+torch
+torchvision
+requests
+Pillow
