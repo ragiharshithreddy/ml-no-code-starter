@@ -68,6 +68,12 @@ try:
 except Exception:
     PYCARET_OK = False
 
+try:
+    import transformers
+    TRANSFORMERS_OK = True
+except Exception:
+    TRANSFORMERS_OK = False
+
 import smtplib
 import ssl
 import json
@@ -95,6 +101,16 @@ if ENABLE_EMAIL and (not OWNER_GMAIL or not OWNER_APP_PASSWORD):
 import zipfile
 from PIL import Image
 import json
+
+@st.cache_resource
+def get_ai_pipeline():
+    """Load lightweight AI model for insights and chat"""
+    try:
+        from transformers import pipeline
+        return pipeline("text-generation", model="distilgpt2", device=-1) # CPU only
+    except Exception as e:
+        st.error(f"AI Pipeline failed to load: {e}")
+        return None
 
 def process_zip_images(uploaded_zip):
     processed_images = []
@@ -127,68 +143,43 @@ def render_dashboard():
     st.markdown("---")
 
 def generate_colab_notebook(task, model_name):
-    notebook = {
-        "cells": [
-            {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": [
-                    "# 🚀 AutoMLPilot Pro - Google Colab Training Notebook\n",
-                    "This notebook was automatically generated to run your training job on Colab's hardware."
-                ]
-            },
-            {
-                "cell_type": "code",
-                "execution_count": None,
-                "metadata": {},
-                "outputs": [],
-                "source": [
-                    "!pip install pandas scikit-learn xgboost pycaret\n",
-                    "import pandas as pd\n",
-                    "print('Dependencies installed successfully!')"
-                ]
-            },
-            {
-                "cell_type": "code",
-                "execution_count": None,
-                "metadata": {},
-                "outputs": [],
-                "source": [
-                    "# Upload your CSV file here\n",
-                    "from google.colab import files\n",
-                    "uploaded = files.upload()\n",
-                    "filename = list(uploaded.keys())[0]\n",
-                    "df = pd.read_csv(filename)\n",
-                    "print(df.head())"
-                ]
-            },
-            {
-                "cell_type": "code",
-                "execution_count": None,
-                "metadata": {},
-                "outputs": [],
-                "source": [
-                    f"# Setup and Train {model_name} for {task}\n",
-                    "# (Insert your custom training logic or PyCaret setup here)\n",
-                    "print('Training complete! Download the model using files.download()')"
-                ]
-            }
-        ],
-        "metadata": {
-            "kernelspec": {
-                "display_name": "Python 3",
-                "language": "python",
-                "name": "python3"
-            },
-            "language_info": {
-                "name": "python",
-                "version": "3.8"
-            }
-        },
-        "nbformat": 4,
-        "nbformat_minor": 4
-    }
-    return json.dumps(notebook, indent=2)
+    """Generate professional Colab notebook from template with session variables"""
+    try:
+        with open("notebooks/training_template.ipynb", "r") as f:
+            template = json.load(f)
+
+        # Inject session specific settings into the template
+        for cell in template['cells']:
+            if cell['cell_type'] == 'code':
+                source = "".join(cell['source'])
+                if 'target_column =' in source and 'task_type =' in source:
+                    cell['source'] = [
+                        f"target_column = '{S.get('target', 'target')}' # @param {{type:\"string\"}}\n",
+                        f"task_type = '{S.get('task', 'classification').lower()}' # @param [\"classification\", \"regression\"]\n"
+                    ]
+                elif 'recipient_email =' in source:
+                    cell['source'] = [
+                        f"recipient_email = '{S.get('user_email', '')}' # @param {{type:\"string\"}}\n",
+                        "sender_email = '' # @param {type:\"string\"}\n",
+                        "sender_password = '' # @param {type:\"string\"}\n"
+                    ]
+                elif 'run_eda =' in source:
+                    cell['source'] = [
+                        "run_eda = True # @param {type:\"boolean\"}\n",
+                        "if run_eda:\n",
+                        "    from ydata_profiling import ProfileReport\n",
+                        "    profile = ProfileReport(df, title=\"Profiling Report\", explorative=True)\n",
+                        "    profile.to_notebook_iframe()"
+                    ]
+
+        return json.dumps(template, indent=2)
+    except Exception as e:
+        # Fallback to a simple notebook if template fails
+        notebook = {
+            "cells": [{"cell_type": "code", "source": [f"# Error loading template: {e}\n", "!pip install pycaret\n"]}],
+            "metadata": {}, "nbformat": 4, "nbformat_minor": 4
+        }
+        return json.dumps(notebook, indent=2)
 
 def send_results_email(to_email: str, subject: str, results: dict, extra_html: str = ""):
     """Send results via email with proper error handling"""
@@ -573,7 +564,7 @@ with st.sidebar:
 # with the block-container CSS handling the internal scrolling for content overflow.
 
 if S["page"] == "chat":
-    st.title("💬 Chat with your Data (Rule-Based)")
+    st.title("💬 Chat with your Data (AI Powered)")
 
     if S["df"] is None:
         st.info("📁 Upload a dataset first from the Dashboard to chat.")
@@ -583,39 +574,40 @@ if S["page"] == "chat":
     if "chat_history" not in S:
         S["chat_history"] = []
 
-    # Pre-determined options
-    options = [
-        "Select a question...",
-        "What are the main trends?",
-        "How to handle missing values?",
-        "What is the distribution of my data?",
-        "How do I choose the best model?"
-    ]
-
-    # Use selectbox for predetermined questions
-    selected_question = st.selectbox("Ask a predefined question about your data:", options)
-
-    if st.button("Ask") and selected_question != "Select a question...":
-        S["chat_history"].append({"role": "user", "content": selected_question})
-
-        # Rule-based answers
-        answer = "I'm not sure how to answer that."
-        if selected_question == "What are the main trends?":
-            cols = ", ".join(S["df"].columns)
-            answer = f"Based on your dataset with columns ({cols}), the main trends typically involve exploring the distribution of numerical features and the frequency of categorical features using the EDA tools on the Exploratory Analysis tab."
-        elif selected_question == "How to handle missing values?":
-            answer = "Handling missing values involves either dropping rows/columns with excessive missing data, or imputing them (e.g. replacing with mean/median for numerical data, or mode for categorical data). You can do this in the Pipeline & Preprocessing tab."
-        elif selected_question == "What is the distribution of my data?":
-            answer = "Data distribution gives insights into the central tendency and spread of your data. Check the Dashboard's automated pandas-profiling report or use custom visualizations to see if your variables follow a normal distribution."
-        elif selected_question == "How do I choose the best model?":
-            answer = "Model selection depends on the task (Regression vs Classification) and the data. For general tasks, Random Forest and XGBoost are excellent starting points. Use the Training & Experiments tab to compare different models automatically."
-
-        S["chat_history"].append({"role": "assistant", "content": answer})
-
     # Display chat messages
     for message in S["chat_history"]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+
+    # Chat Input
+    if prompt := st.chat_input("Ask something about your data..."):
+        S["chat_history"].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            if TRANSFORMERS_OK:
+                with st.spinner("AI is thinking..."):
+                    try:
+                        generator = get_ai_pipeline()
+                        # Provide context to the AI
+                        df_info = f"Dataset has {S['df'].shape[0]} rows and columns: {', '.join(S['df'].columns)}."
+                        full_prompt = f"Context: {df_info}\nUser Question: {prompt}\nAI Answer:"
+
+                        response = generator(full_prompt, max_new_tokens=100, num_return_sequences=1)[0]['generated_text']
+                        answer = response.split("AI Answer:")[-1].strip()
+                        st.markdown(answer)
+                        S["chat_history"].append({"role": "assistant", "content": answer})
+                    except Exception as e:
+                        st.error(f"AI Chat failed: {e}")
+            else:
+                st.warning("AI model not loaded. Using fallback rule-based system.")
+                # Fallback rule-based logic
+                answer = "I'm not sure how to answer that without the AI model."
+                if "trend" in prompt.lower():
+                    answer = f"The dataset contains columns: {', '.join(S['df'].columns)}. You can explore trends in the EDA section."
+                st.markdown(answer)
+                S["chat_history"].append({"role": "assistant", "content": answer})
 
 elif S["page"] == "dashboard":
 
@@ -704,6 +696,66 @@ elif S["page"] == "dashboard":
     
     with col2:
         st.markdown("### 📧 Email Configuration")
+
+        if S["df"] is not None:
+            if st.button("✨ Surprise Me (Quick AutoML)", type="primary", use_container_width=True):
+                with st.spinner("Running Automated Pipeline..."):
+                    try:
+                        # 1. Automated Target Detection
+                        df = S["df"].copy()
+                        target = df.columns[-1] # Default to last column
+                        S["target"] = target
+
+                        # 2. Automated Task Selection
+                        n_unique = df[target].nunique()
+                        is_numeric = pd.api.types.is_numeric_dtype(df[target])
+                        task = "Regression" if (is_numeric and n_unique > 20) else "Classification"
+                        S["task"] = task
+
+                        # 3. Quick Preprocessing (Drop NaNs for speed)
+                        df = df.dropna()
+                        S["df"] = df
+
+                        # 4. Run PyCaret AutoML
+                        if PYCARET_OK:
+                            if task == "Classification":
+                                s = cls_setup(data=df, target=target, session_id=123, verbose=False, html=False)
+                                best = cls_compare(verbose=False)
+                                model = cls_finalize(best)
+                                res_df = cls_pull()
+                                results = {
+                                    "model": str(best).split('(')[0],
+                                    "task": task,
+                                    "accuracy": round(float(res_df.iloc[0]['Accuracy']), 4),
+                                    "f1_score": round(float(res_df.iloc[0]['F1']), 4)
+                                }
+                            else:
+                                s = reg_setup(data=df, target=target, session_id=123, verbose=False, html=False)
+                                best = reg_compare(verbose=False)
+                                model = reg_finalize(best)
+                                res_df = reg_pull()
+                                results = {
+                                    "model": str(best).split('(')[0],
+                                    "task": task,
+                                    "rmse": round(float(res_df.iloc[0]['RMSE']), 4),
+                                    "r2_score": round(float(res_df.iloc[0]['R2']), 4)
+                                }
+
+                            S["model"] = model
+                            S["results"] = results
+                            S["leaderboard"].append(results)
+                            st.success(f"🚀 Quick AutoML Complete! Best Model: **{results['model']}**")
+
+                            # 5. Auto Email
+                            if ENABLE_EMAIL and S["user_email"]:
+                                send_results_email(S["user_email"], "Surprise Me Report", results)
+                                st.info(f"📧 Report sent to {S['user_email']}")
+                        else:
+                            st.error("PyCaret is required for Surprise Me.")
+                    except Exception as e:
+                        st.error(f"Surprise Me failed: {e}")
+
+        st.markdown("---")
         if ENABLE_EMAIL:
             S["user_email"] = st.text_input(
                 "Recipient email",
@@ -2283,10 +2335,16 @@ elif S["page"] == "deployment":
 
         elif load_method == "Upload File":
             uploaded_model = st.file_uploader("Upload .pkl model file", type=["pkl"])
+            metadata_file = st.file_uploader("Upload metadata .json (optional)", type=["json"])
             if uploaded_model is not None:
                 try:
                     model = joblib.load(uploaded_model)
                     st.success("✅ Model uploaded successfully!")
+
+                    if metadata_file:
+                        meta = json.load(metadata_file)
+                        S["label_encoders"] = meta.get("label_encoders", {})
+                        features = meta.get("features", [])
                 except Exception as e:
                     st.error(f"❌ Failed to load model: {str(e)}")
 
