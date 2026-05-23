@@ -11,3 +11,9 @@ xgboost
 seaborn
 kaleido
 pycaret
+transformers
+torch
+torchvision
+shap
+requests
+jinja2
