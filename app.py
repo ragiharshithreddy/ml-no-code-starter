@@ -41,6 +41,7 @@ warnings.filterwarnings('ignore')
 import pickle
 import joblib
 import io
+import requests
 
 # Optional libraries
 try:
@@ -68,6 +69,13 @@ try:
 except Exception:
     PYCARET_OK = False
 
+try:
+    import torch
+    from transformers import pipeline
+    TRANSFORMERS_OK = True
+except Exception:
+    TRANSFORMERS_OK = False
+
 import smtplib
 import ssl
 import json
@@ -89,7 +97,15 @@ SENDER_NAME = st.secrets.get("SMTP_SENDER_NAME", "AutoMLPilot")
 if ENABLE_EMAIL and (not OWNER_GMAIL or not OWNER_APP_PASSWORD):
     ENABLE_EMAIL = False
 
-
+@st.cache_resource
+def get_ai_pipeline():
+    """Load lightweight AI model for browser-based insights"""
+    if not TRANSFORMERS_OK:
+        return None
+    try:
+        return pipeline("text-generation", model="distilgpt2", device=-1)
+    except Exception:
+        return None
 
 # ===================== HELPER FUNCTIONS =====================
 import zipfile
@@ -127,68 +143,46 @@ def render_dashboard():
     st.markdown("---")
 
 def generate_colab_notebook(task, model_name):
-    notebook = {
-        "cells": [
-            {
-                "cell_type": "markdown",
-                "metadata": {},
-                "source": [
-                    "# 🚀 AutoMLPilot Pro - Google Colab Training Notebook\n",
-                    "This notebook was automatically generated to run your training job on Colab's hardware."
-                ]
-            },
-            {
-                "cell_type": "code",
-                "execution_count": None,
-                "metadata": {},
-                "outputs": [],
-                "source": [
-                    "!pip install pandas scikit-learn xgboost pycaret\n",
-                    "import pandas as pd\n",
-                    "print('Dependencies installed successfully!')"
-                ]
-            },
-            {
-                "cell_type": "code",
-                "execution_count": None,
-                "metadata": {},
-                "outputs": [],
-                "source": [
-                    "# Upload your CSV file here\n",
-                    "from google.colab import files\n",
-                    "uploaded = files.upload()\n",
-                    "filename = list(uploaded.keys())[0]\n",
-                    "df = pd.read_csv(filename)\n",
-                    "print(df.head())"
-                ]
-            },
-            {
-                "cell_type": "code",
-                "execution_count": None,
-                "metadata": {},
-                "outputs": [],
-                "source": [
-                    f"# Setup and Train {model_name} for {task}\n",
-                    "# (Insert your custom training logic or PyCaret setup here)\n",
-                    "print('Training complete! Download the model using files.download()')"
-                ]
-            }
-        ],
-        "metadata": {
-            "kernelspec": {
-                "display_name": "Python 3",
-                "language": "python",
-                "name": "python3"
-            },
-            "language_info": {
-                "name": "python",
-                "version": "3.8"
-            }
-        },
-        "nbformat": 4,
-        "nbformat_minor": 4
-    }
-    return json.dumps(notebook, indent=2)
+    try:
+        with open("notebooks/training_template.ipynb", "r") as f:
+            template = json.load(f)
+
+        # Update template with current config
+        for cell in template['cells']:
+            if cell['cell_type'] == 'code':
+                source = "".join(cell['source'])
+                if 'target_column =' in source and 'task_type =' in source:
+                    cell['source'] = [
+                        f"target_column = '{S.get('target', 'target')}' # @param {{type:\"string\"}}\n",
+                        f"task_type = '{task.lower() if task else S.get('task', 'classification').lower()}' # @param [\"classification\", \"regression\"]\n"
+                    ]
+                elif 'recipient_email =' in source:
+                    cell['source'] = [
+                        f"recipient_email = '{S.get('user_email', '')}' # @param {{type:\"string\"}}\n",
+                        f"sender_email = '' # @param {{type:\"string\"}}\n",
+                        f"sender_password = '' # @param {{type:\"string\"}}\n"
+                    ]
+                elif 'run_eda =' in source:
+                    cell['source'] = [
+                        "run_eda = True # @param {type:\"boolean\"}\n",
+                        "if run_eda:\n",
+                        "    from ydata_profiling import ProfileReport\n",
+                        "    profile = ProfileReport(df, title=\"Profiling Report\", explorative=True)\n",
+                        "    profile.to_notebook_iframe()"
+                    ]
+
+        return json.dumps(template, indent=2)
+    except Exception as e:
+        # Fallback to simple notebook if template fails
+        notebook = {
+            "cells": [
+                {"cell_type": "markdown", "metadata": {}, "source": ["# 🚀 AutoMLPilot Pro - Google Colab Training Notebook\nFallback version."]},
+                {"cell_type": "code", "execution_count": None, "metadata": {}, "outputs": [], "source": ["!pip install pandas scikit-learn xgboost pycaret\nimport pandas as pd"]}
+            ],
+            "metadata": {"kernelspec": {"display_name": "Python 3", "language": "python", "name": "python3"}},
+            "nbformat": 4, "nbformat_minor": 4
+        }
+        return json.dumps(notebook, indent=2)
 
 def send_results_email(to_email: str, subject: str, results: dict, extra_html: str = ""):
     """Send results via email with proper error handling"""
@@ -573,7 +567,7 @@ with st.sidebar:
 # with the block-container CSS handling the internal scrolling for content overflow.
 
 if S["page"] == "chat":
-    st.title("💬 Chat with your Data (Rule-Based)")
+    st.title("💬 Chat (AI Powered)")
 
     if S["df"] is None:
         st.info("📁 Upload a dataset first from the Dashboard to chat.")
@@ -583,39 +577,36 @@ if S["page"] == "chat":
     if "chat_history" not in S:
         S["chat_history"] = []
 
-    # Pre-determined options
-    options = [
-        "Select a question...",
-        "What are the main trends?",
-        "How to handle missing values?",
-        "What is the distribution of my data?",
-        "How do I choose the best model?"
-    ]
-
-    # Use selectbox for predetermined questions
-    selected_question = st.selectbox("Ask a predefined question about your data:", options)
-
-    if st.button("Ask") and selected_question != "Select a question...":
-        S["chat_history"].append({"role": "user", "content": selected_question})
-
-        # Rule-based answers
-        answer = "I'm not sure how to answer that."
-        if selected_question == "What are the main trends?":
-            cols = ", ".join(S["df"].columns)
-            answer = f"Based on your dataset with columns ({cols}), the main trends typically involve exploring the distribution of numerical features and the frequency of categorical features using the EDA tools on the Exploratory Analysis tab."
-        elif selected_question == "How to handle missing values?":
-            answer = "Handling missing values involves either dropping rows/columns with excessive missing data, or imputing them (e.g. replacing with mean/median for numerical data, or mode for categorical data). You can do this in the Pipeline & Preprocessing tab."
-        elif selected_question == "What is the distribution of my data?":
-            answer = "Data distribution gives insights into the central tendency and spread of your data. Check the Dashboard's automated pandas-profiling report or use custom visualizations to see if your variables follow a normal distribution."
-        elif selected_question == "How do I choose the best model?":
-            answer = "Model selection depends on the task (Regression vs Classification) and the data. For general tasks, Random Forest and XGBoost are excellent starting points. Use the Training & Experiments tab to compare different models automatically."
-
-        S["chat_history"].append({"role": "assistant", "content": answer})
-
-    # Display chat messages
+    # Display chat messages from history on app rerun
     for message in S["chat_history"]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+
+    # React to user input
+    if prompt := st.chat_input("Ask anything about your data..."):
+        # Display user message in chat message container
+        with st.chat_message("user"):
+            st.markdown(prompt)
+        # Add user message to chat history
+        S["chat_history"].append({"role": "user", "content": prompt})
+
+        with st.chat_message("assistant"):
+            if TRANSFORMERS_OK:
+                with st.spinner("AI is thinking..."):
+                    try:
+                        # Contextualize prompt with data info
+                        summary = S["df"].describe().to_string()
+                        full_prompt = f"Data Summary: {summary[:500]}\nUser Question: {prompt}\nAnswer:"
+
+                        generator = get_ai_pipeline()
+                        response = generator(full_prompt, max_new_tokens=100, num_return_sequences=1)[0]['generated_text']
+                        answer = response.split("Answer:")[-1].strip()
+                        st.markdown(answer)
+                        S["chat_history"].append({"role": "assistant", "content": answer})
+                    except Exception as e:
+                        st.error(f"AI Error: {str(e)}")
+            else:
+                st.warning("🤖 AI model not loaded. Please check transformers/torch installation.")
 
 elif S["page"] == "dashboard":
 
@@ -741,9 +732,64 @@ elif S["page"] == "dashboard":
 
     # EDA Section
     if S["df"] is not None:
+        st.markdown("### ⚡ Quick AutoML")
+        if st.button("🪄 Surprise Me!", type="primary", use_container_width=True, help="One-click Automated ML: EDA, Preprocessing, and Training"):
+            with st.spinner("Executing Quick AutoML..."):
+                try:
+                    df = S["df"].copy()
+                    # 1. Basic Imputation
+                    imputer = SimpleImputer(strategy="mean")
+                    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+                    if num_cols:
+                        df[num_cols] = imputer.fit_transform(df[num_cols])
+
+                    # 2. Automated Target Detection
+                    # Simple heuristic: last column
+                    target_col = df.columns[-1]
+                    S["target"] = target_col
+
+                    # 3. Task Detection
+                    n_unique = df[target_col].nunique()
+                    is_numeric = pd.api.types.is_numeric_dtype(df[target_col])
+                    task = "Regression" if (is_numeric and n_unique > 20) else "Classification"
+                    S["task"] = task
+
+                    # 4. PyCaret Training
+                    if PYCARET_OK:
+                        if task == "Classification":
+                            cls_setup(data=df, target=target_col, session_id=123, verbose=False, html=False)
+                            best = cls_compare(verbose=False)
+                            model = cls_finalize(best)
+                            metrics = cls_pull().iloc[0].to_dict()
+                        else:
+                            reg_setup(data=df, target=target_col, session_id=123, verbose=False, html=False)
+                            best = reg_compare(verbose=False)
+                            model = reg_finalize(best)
+                            metrics = reg_pull().iloc[0].to_dict()
+
+                        S["model"] = model
+                        S["results"] = {
+                            "model": str(best).split('(')[0],
+                            "task": task,
+                            **metrics
+                        }
+                        if "leaderboard" not in S: S["leaderboard"] = []
+                        S["leaderboard"].append(S["results"])
+
+                        # 5. Automated Email (if possible)
+                        if ENABLE_EMAIL and S["user_email"]:
+                            send_results_email(S["user_email"], "Surprise Me! AutoML Results", S["results"])
+                            st.success(f"✅ AutoML Complete! Best model: **{S['results']['model']}**. Report sent to {S['user_email']}")
+                        else:
+                            st.success(f"✅ AutoML Complete! Best model: **{S['results']['model']}**")
+                    else:
+                        st.error("❌ PyCaret not available for Quick AutoML.")
+                except Exception as e:
+                    st.error(f"❌ Quick AutoML failed: {str(e)}")
+
         st.markdown("### 📊 Exploratory Data Analysis")
         
-        if st.button("🔍 Generate Full EDA Report", type="primary"):
+        if st.button("🔍 Generate Full EDA Report"):
             with st.spinner("Generating comprehensive report..."):
                 try:
                     report_html = profile_html(S["df"])
@@ -1047,37 +1093,13 @@ elif S["page"] == "train":
         st.markdown("#### Generate Training Notebook")
         st.write("Download a Google Colab compatible notebook to run advanced AutoML on your current dataset.")
 
-        if st.button("📓 Generate Notebook"):
-            try:
-                with open("notebooks/training_template.ipynb", "r") as f:
-                    template = json.load(f)
-
-                # Update template with current config
-                for cell in template['cells']:
-                    if cell['cell_type'] == 'code':
-                        source = "".join(cell['source'])
-                        if 'target_column =' in source and 'task_type =' in source:
-                            cell['source'] = [
-                                f"target_column = '{S['target']}' # @param {{type:\"string\"}}\n",
-                                f"task_type = '{S['task'].lower()}' # @param [\"classification\", \"regression\"]\n"
-                            ]
-                        elif 'recipient_email =' in source:
-                            cell['source'] = [
-                                f"recipient_email = '{S.get('user_email', '')}' # @param {{type:\"string\"}}\n",
-                                f"sender_email = '' # @param {{type:\"string\"}}\n",
-                                f"sender_password = '' # @param {{type:\"string\"}}\n"
-                            ]
-
-                notebook_str = json.dumps(template, indent=2)
-                st.download_button(
-                    label="📥 Download Colab Notebook",
-                    data=notebook_str,
-                    file_name="automlpilot_training.ipynb",
-                    mime="application/x-ipynb+json"
-                )
-                st.success("✅ Notebook generated! Download it and upload to Google Colab.")
-            except Exception as e:
-                st.error(f"❌ Notebook generation failed: {str(e)}")
+        colab_json = generate_colab_notebook(S["task"], "automl")
+        st.download_button(
+            label="📥 Download Colab Notebook",
+            data=colab_json,
+            file_name="automlpilot_training.ipynb",
+            mime="application/x-ipynb+json"
+        )
 
     # Feature Engineering
     with st.expander("✨ Feature Engineering", expanded=False):
@@ -2245,15 +2267,53 @@ elif S["page"] == "results":
     
     # Download results
     st.markdown("---")
-    st.markdown("### 💾 Download Results")
+    st.markdown("### 💾 Export Assets")
     
-    results_json = json.dumps(results, indent=2)
-    st.download_button(
-        label="📥 Download as JSON",
-        data=results_json,
-        file_name=f"automl_results_{results.get('model', 'model')}.json",
-        mime="application/json"
-    )
+    dl_col1, dl_col2, dl_col3 = st.columns(3)
+
+    with dl_col1:
+        results_json = json.dumps(results, indent=2)
+        st.download_button(
+            label="📥 Metrics (JSON)",
+            data=results_json,
+            file_name=f"automl_results_{results.get('model', 'model')}.json",
+            mime="application/json",
+            use_container_width=True
+        )
+
+    with dl_col2:
+        if S.get("model") is not None:
+            try:
+                model_buffer = io.BytesIO()
+                joblib.dump(S["model"], model_buffer)
+                st.download_button(
+                    label="📥 Trained Model (.pkl)",
+                    data=model_buffer.getvalue(),
+                    file_name=f"model_{results.get('model', 'automl')}.pkl",
+                    mime="application/octet-stream",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.error(f"Model export failed: {e}")
+
+    with dl_col3:
+        # Export metadata for deployment reconstruction
+        metadata = {
+            "model": results.get("model"),
+            "task": results.get("task"),
+            "final_cols": S.get("final_cols"),
+            "scaler_name": S.get("scaler_name"),
+            # Note: encoders are hard to serialize to JSON easily if they are sklearn objects
+            # but we can store the classes at least or suggest using the .pkl
+        }
+        meta_json = json.dumps(metadata, indent=2)
+        st.download_button(
+            label="📥 Metadata (JSON)",
+            data=meta_json,
+            file_name="model_metadata.json",
+            mime="application/json",
+            use_container_width=True
+        )
 
 # ===================== DEPLOYMENT =====================
 elif S["page"] == "deployment":
@@ -2261,14 +2321,14 @@ elif S["page"] == "deployment":
     st.markdown("### Test your trained models in the browser")
 
     st.error("❗ **CRITICAL SECURITY WARNING:** Loading `.pkl` files using `joblib` or `pickle` can execute arbitrary code on the server. "
-             "URL imports have been disabled for security. Only upload models from sources you trust completely. Use at your own risk.")
+             "Only upload models from sources you trust completely. Use at your own risk.")
 
     col1, col2 = st.columns([1, 2])
 
     with col1:
         st.markdown("#### 📤 Load Model")
 
-        load_method = st.radio("Load Method", ["Current Session", "Upload File"])
+        load_method = st.radio("Load Method", ["Current Session", "Upload File", "Import via URL"])
 
         model = None
         features = []
@@ -2289,6 +2349,35 @@ elif S["page"] == "deployment":
                     st.success("✅ Model uploaded successfully!")
                 except Exception as e:
                     st.error(f"❌ Failed to load model: {str(e)}")
+
+        elif load_method == "Import via URL":
+            model_url = st.text_input("Enter direct .pkl URL", placeholder="https://example.com/model.pkl")
+            if model_url:
+                try:
+                    with st.spinner("Downloading model..."):
+                        response = requests.get(model_url, timeout=10)
+                        if response.status_code == 200:
+                            model = joblib.load(io.BytesIO(response.content))
+                            st.success("✅ Model imported successfully!")
+                        else:
+                            st.error(f"❌ Failed to download model (Status: {response.status_code})")
+                except Exception as e:
+                    st.error(f"❌ URL Import failed: {str(e)}")
+
+        st.markdown("---")
+        st.markdown("#### 📄 Optional: Load Metadata")
+        metadata_file = st.file_uploader("Upload model_metadata.json (for feature mapping)", type=["json"])
+        if metadata_file:
+            try:
+                meta = json.load(metadata_file)
+                if 'final_cols' in meta:
+                    features = meta['final_cols']
+                    st.success("✅ Metadata loaded! Feature mapping updated.")
+                if 'label_encoders' in meta:
+                    # In a real app we'd need to reconstruct the encoders, but for now we note it
+                    st.info("ℹ️ Metadata contains encoder info.")
+            except Exception as e:
+                st.error(f"❌ Metadata error: {str(e)}")
 
         # Feature detection for uploaded/URL models
         if model and not features:
