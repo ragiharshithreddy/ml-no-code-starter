@@ -1095,7 +1095,7 @@ elif S["page"] == "train":
         
         st.markdown("#### Create Derived Features")
         
-        feature_cols = [c for c in df.columns if c != S["target"] and pd.api.types.is_numeric_dtype(df[c])]
+        feature_cols = list(set(df.select_dtypes(include=np.number).columns.tolist()) - {S["target"]})
         
         if len(feature_cols) >= 2:
             col_a, col_b = st.columns(2)
