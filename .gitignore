@@ -1,1 +1,7 @@
 __pycache__
+.pytest_cache
+verification/
+*.log
+*.pkl
+.ipynb_checkpoints
+.streamlit/secrets.toml
