@@ -11,3 +11,5 @@ xgboost
 seaborn
 kaleido
 pycaret
+transformers
+torch

@@ -1,0 +1,39 @@
+
+Collecting usage statistics. To deactivate, set browser.gatherUsageStats to false.
+
+2026-06-12 19:59:31.340 Uvicorn server started on 0.0.0.0:8501
+
+  You can now view your Streamlit app in your browser.
+
+  Local URL: http://localhost:8501
+  Network URL: http://192.168.0.2:8501
+  External URL: http://34.27.142.64:8501
+
+2026-06-12 20:04:16.646 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-06-12 20:04:16.655 Please replace `use_container_width` with `width`.
+
+`use_container_width` will be removed after 2025-12-31.
+
+For `use_container_width=True`, use `width='stretch'`. For `use_container_width=False`, use `width='content'`.
+2026-06-12 20:04:16.656 Serialization of dataframe to Arrow table was unsuccessful. Applying automatic fixes for column types to make the dataframe Arrow-compatible.
+Traceback (most recent call last):
+  File "/home/jules/.pyenv/versions/3.12.13/lib/python3.12/site-packages/streamlit/dataframe_util.py", line 961, in convert_pandas_df_to_arrow_bytes
+    table = pa.Table.from_pandas(df)
+            ^^^^^^^^^^^^^^^^^^^^^^^^
+  File "pyarrow/table.pxi", line 4768, in pyarrow.lib.Table.from_pandas
+  File "/home/jules/.pyenv/versions/3.12.13/lib/python3.12/site-packages/pyarrow/pandas_compat.py", line 651, in dataframe_to_arrays
+    arrays = [convert_column(c, f)
+              ^^^^^^^^^^^^^^^^^^^^
+  File "/home/jules/.pyenv/versions/3.12.13/lib/python3.12/site-packages/pyarrow/pandas_compat.py", line 639, in convert_column
+    raise e
+  File "/home/jules/.pyenv/versions/3.12.13/lib/python3.12/site-packages/pyarrow/pandas_compat.py", line 633, in convert_column
+    result = pa.array(col, type=type_, from_pandas=True, safe=safe)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "pyarrow/array.pxi", line 390, in pyarrow.lib.array
+  File "pyarrow/array.pxi", line 91, in pyarrow.lib._ndarray_to_array
+  File "pyarrow/error.pxi", line 92, in pyarrow.lib.check_status
+pyarrow.lib.ArrowInvalid: ("Could not convert dtype('int64') with type numpy.dtypes.Int64DType: did not recognize Python value type when inferring an Arrow data type", 'Conversion failed for column Type with type object')
