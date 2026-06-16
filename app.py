@@ -68,6 +68,19 @@ try:
 except Exception:
     PYCARET_OK = False
 
+try:
+    from transformers import pipeline
+    import torch
+    TRANSFORMERS_OK = True
+except Exception:
+    TRANSFORMERS_OK = False
+
+@st.cache_resource
+def get_ai_pipeline():
+    if not TRANSFORMERS_OK:
+        return None
+    return pipeline("text-generation", model="distilgpt2", device=-1)
+
 import smtplib
 import ssl
 import json
@@ -573,49 +586,41 @@ with st.sidebar:
 # with the block-container CSS handling the internal scrolling for content overflow.
 
 if S["page"] == "chat":
-    st.title("💬 Chat with your Data (Rule-Based)")
+    st.title("💬 AI Data Assistant")
 
     if S["df"] is None:
         st.info("📁 Upload a dataset first from the Dashboard to chat.")
         st.stop()
 
+    if not TRANSFORMERS_OK:
+        st.error("Transformers not installed. Rule-based chat unavailable.")
+        st.stop()
+
     # Initialize chat history
-    if "chat_history" not in S:
+    if "chat_history" not in S or not isinstance(S["chat_history"], list):
         S["chat_history"] = []
 
-    # Pre-determined options
-    options = [
-        "Select a question...",
-        "What are the main trends?",
-        "How to handle missing values?",
-        "What is the distribution of my data?",
-        "How do I choose the best model?"
-    ]
-
-    # Use selectbox for predetermined questions
-    selected_question = st.selectbox("Ask a predefined question about your data:", options)
-
-    if st.button("Ask") and selected_question != "Select a question...":
-        S["chat_history"].append({"role": "user", "content": selected_question})
-
-        # Rule-based answers
-        answer = "I'm not sure how to answer that."
-        if selected_question == "What are the main trends?":
-            cols = ", ".join(S["df"].columns)
-            answer = f"Based on your dataset with columns ({cols}), the main trends typically involve exploring the distribution of numerical features and the frequency of categorical features using the EDA tools on the Exploratory Analysis tab."
-        elif selected_question == "How to handle missing values?":
-            answer = "Handling missing values involves either dropping rows/columns with excessive missing data, or imputing them (e.g. replacing with mean/median for numerical data, or mode for categorical data). You can do this in the Pipeline & Preprocessing tab."
-        elif selected_question == "What is the distribution of my data?":
-            answer = "Data distribution gives insights into the central tendency and spread of your data. Check the Dashboard's automated pandas-profiling report or use custom visualizations to see if your variables follow a normal distribution."
-        elif selected_question == "How do I choose the best model?":
-            answer = "Model selection depends on the task (Regression vs Classification) and the data. For general tasks, Random Forest and XGBoost are excellent starting points. Use the Training & Experiments tab to compare different models automatically."
-
-        S["chat_history"].append({"role": "assistant", "content": answer})
-
-    # Display chat messages
     for message in S["chat_history"]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+
+    if prompt := st.chat_input("Ask about your data..."):
+        S["chat_history"].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    generator = get_ai_pipeline()
+                    context = f"Data columns: {list(S['df'].columns)}. Stats: {S['df'].describe().iloc[:, :5].to_dict()}. "
+                    full_prompt = f"Context: {context} Question: {prompt} Answer:"
+                    response = generator(full_prompt, max_new_tokens=50, num_return_sequences=1)[0]['generated_text']
+                    answer = response.split("Answer:")[-1].strip()
+                    st.markdown(answer)
+                    S["chat_history"].append({"role": "assistant", "content": answer})
+                except Exception as e:
+                    st.error(f"AI error: {e}")
 
 elif S["page"] == "dashboard":
 
@@ -741,9 +746,67 @@ elif S["page"] == "dashboard":
 
     # EDA Section
     if S["df"] is not None:
+        st.markdown("### ⚡ Quick Actions")
+        if st.button("🎁 Surprise Me! (Quick AutoML)", type="primary", use_container_width=True):
+            with st.spinner("🚀 Running full AutoML pipeline..."):
+                try:
+                    df = S["df"].copy()
+                    # 1. Basic Preprocessing
+                    num_cols = df.select_dtypes(include=[np.number]).columns
+                    if not num_cols.empty:
+                        imputer = SimpleImputer(strategy="median")
+                        df[num_cols] = imputer.fit_transform(df[num_cols])
+
+                    # 2. Auto-detect target (last column)
+                    target = df.columns[-1]
+                    S["target"] = target
+
+                    # 3. Detect Task
+                    n_unique = df[target].nunique()
+                    is_numeric = pd.api.types.is_numeric_dtype(df[target])
+                    task = "Regression" if (is_numeric and n_unique > 20) else "Classification"
+                    S["task"] = task
+
+                    # 4. PyCaret AutoML
+                    if PYCARET_OK:
+                        if task == "Classification":
+                            cls_setup(data=df, target=target, session_id=123, verbose=False, html=False)
+                            best = cls_compare(n_select=1)
+                            model = cls_finalize(best)
+                            results_df = cls_pull()
+                            acc = float(results_df.iloc[0]['Accuracy'])
+                            res = {"model": str(best).split('(')[0], "task": task, "accuracy": acc}
+                            cls_save(model, 'surprise_model')
+                        else:
+                            reg_setup(data=df, target=target, session_id=123, verbose=False, html=False)
+                            best = reg_compare(n_select=1)
+                            model = reg_finalize(best)
+                            results_df = reg_pull()
+                            r2 = float(results_df.iloc[0]['R2'])
+                            res = {"model": str(best).split('(')[0], "task": task, "r2_score": r2}
+                            reg_save(model, 'surprise_model')
+
+                        S["model"] = model
+                        S["results"] = res
+                        if "leaderboard" not in S: S["leaderboard"] = []
+                        S["leaderboard"].append(res)
+
+                        # 5. Email results if configured
+                        if S.get("user_email"):
+                            send_results_email(S["user_email"], "Surprise! Your AutoML Results", res)
+
+                        st.success(f"✅ Surprise! Best model: **{res['model']}**")
+
+                        with open("surprise_model.pkl", "rb") as f:
+                            st.download_button("📥 Download Best Model (.pkl)", f, "best_model.pkl")
+                    else:
+                        st.error("PyCaret is required for Surprise Me!")
+                except Exception as e:
+                    st.error(f"Surprise failed: {e}")
+
         st.markdown("### 📊 Exploratory Data Analysis")
         
-        if st.button("🔍 Generate Full EDA Report", type="primary"):
+        if st.button("🔍 Generate Full EDA Report", use_container_width=True):
             with st.spinner("Generating comprehensive report..."):
                 try:
                     report_html = profile_html(S["df"])
@@ -2261,14 +2324,14 @@ elif S["page"] == "deployment":
     st.markdown("### Test your trained models in the browser")
 
     st.error("❗ **CRITICAL SECURITY WARNING:** Loading `.pkl` files using `joblib` or `pickle` can execute arbitrary code on the server. "
-             "URL imports have been disabled for security. Only upload models from sources you trust completely. Use at your own risk.")
+             "Only load models from sources you trust completely. Use at your own risk.")
 
     col1, col2 = st.columns([1, 2])
 
     with col1:
         st.markdown("#### 📤 Load Model")
 
-        load_method = st.radio("Load Method", ["Current Session", "Upload File"])
+        load_method = st.radio("Load Method", ["Current Session", "Upload File", "Import URL"])
 
         model = None
         features = []
@@ -2289,6 +2352,17 @@ elif S["page"] == "deployment":
                     st.success("✅ Model uploaded successfully!")
                 except Exception as e:
                     st.error(f"❌ Failed to load model: {str(e)}")
+
+        elif load_method == "Import URL":
+            model_url = st.text_input("Model URL (.pkl)", placeholder="https://example.com/model.pkl")
+            if model_url:
+                try:
+                    import requests
+                    resp = requests.get(model_url, timeout=10)
+                    model = joblib.load(io.BytesIO(resp.content))
+                    st.success("✅ Model imported from URL!")
+                except Exception as e:
+                    st.error(f"❌ URL import failed: {e}")
 
         # Feature detection for uploaded/URL models
         if model and not features:
