@@ -68,6 +68,13 @@ try:
 except Exception:
     PYCARET_OK = False
 
+try:
+    from transformers import pipeline
+    import torch
+    TRANSFORMERS_OK = True
+except Exception:
+    TRANSFORMERS_OK = False
+
 import smtplib
 import ssl
 import json
@@ -143,9 +150,9 @@ def generate_colab_notebook(task, model_name):
                 "metadata": {},
                 "outputs": [],
                 "source": [
-                    "!pip install pandas scikit-learn xgboost pycaret\n",
-                    "import pandas as pd\n",
-                    "print('Dependencies installed successfully!')"
+                    "# @title 1. Install Dependencies\n",
+                    "!pip install -q pycaret[full] ydata-profiling pandas jinja2 shap\n",
+                    "print('✅ Dependencies installed!')"
                 ]
             },
             {
@@ -154,12 +161,13 @@ def generate_colab_notebook(task, model_name):
                 "metadata": {},
                 "outputs": [],
                 "source": [
-                    "# Upload your CSV file here\n",
+                    "# @title 2. Load Dataset\n",
+                    "import pandas as pd\n",
                     "from google.colab import files\n",
                     "uploaded = files.upload()\n",
                     "filename = list(uploaded.keys())[0]\n",
                     "df = pd.read_csv(filename)\n",
-                    "print(df.head())"
+                    "print(f'✅ Loaded {filename}')"
                 ]
             },
             {
@@ -168,9 +176,19 @@ def generate_colab_notebook(task, model_name):
                 "metadata": {},
                 "outputs": [],
                 "source": [
-                    f"# Setup and Train {model_name} for {task}\n",
-                    "# (Insert your custom training logic or PyCaret setup here)\n",
-                    "print('Training complete! Download the model using files.download()')"
+                    "# @title 3. Automated EDA & Training\n",
+                    f"target = '{S.get('target', 'target')}'\n",
+                    f"task_type = '{task.lower()}'\n",
+                    "if task_type == 'classification':\n",
+                    "    from pycaret.classification import setup, compare_models, finalize_model, save_model, pull\n",
+                    "else:\n",
+                    "    from pycaret.regression import setup, compare_models, finalize_model, save_model, pull\n",
+                    "\n",
+                    "s = setup(data=df, target=target, session_id=123)\n",
+                    "best = compare_models()\n",
+                    "final = finalize_model(best)\n",
+                    "save_model(final, 'best_model')\n",
+                    "print('✅ Training complete!')"
                 ]
             }
         ],
@@ -259,6 +277,96 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
         st.error(f"❌ Unexpected error: {str(e)}")
         return False
 
+@st.cache_resource(show_spinner="Loading AI model...")
+def get_ai_pipeline():
+    """Load AI pipeline for text generation (CPU optimized)"""
+    if not TRANSFORMERS_OK:
+        return None
+    try:
+        return pipeline("text-generation", model="distilgpt2", device=-1)
+    except Exception:
+        return None
+
+def run_surprise_me():
+    """Execute end-to-end automated ML pipeline"""
+    if S["df"] is None:
+        st.error("No data found!")
+        return
+
+    with st.status("🪄 Running Quick AutoML...", expanded=True) as status:
+        try:
+            df = S["df"].copy()
+            # 1. Automated Target Detection (last column if not set)
+            if not S["target"]:
+                S["target"] = df.columns[-1]
+                st.write(f"🎯 Auto-detected target: **{S['target']}**")
+
+            # 2. Basic Preprocessing
+            st.write("🧹 Preprocessing data...")
+            num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+            if num_cols:
+                imputer = SimpleImputer(strategy="median")
+                df[num_cols] = imputer.fit_transform(df[num_cols])
+
+            # 3. Detect Task
+            n_unique = df[S["target"]].nunique()
+            is_numeric = pd.api.types.is_numeric_dtype(df[S["target"]])
+            if is_numeric and n_unique > 20:
+                task = "Regression"
+            else:
+                task = "Classification"
+            S["task"] = task
+            st.write(f"🧪 Task detected: **{task}**")
+
+            # 4. PyCaret Training
+            st.write("🤖 Training best model with PyCaret...")
+            if task == "Classification":
+                cls_setup(data=df, target=S["target"], session_id=123, verbose=False, html=False)
+                best_model = cls_compare(verbose=False)
+                model = cls_finalize(best_model)
+                results_df = cls_pull()
+                best_row = results_df.iloc[0]
+                results = {
+                    "model": str(best_model).split('(')[0],
+                    "task": task,
+                    "accuracy": round(float(best_row['Accuracy']), 4),
+                    "f1_score": round(float(best_row['F1']), 4)
+                }
+            else:
+                reg_setup(data=df, target=S["target"], session_id=123, verbose=False, html=False)
+                best_model = reg_compare(verbose=False)
+                model = reg_finalize(best_model)
+                results_df = reg_pull()
+                best_row = results_df.iloc[0]
+                results = {
+                    "model": str(best_model).split('(')[0],
+                    "task": task,
+                    "rmse": round(float(best_row['RMSE']), 4),
+                    "r2_score": round(float(best_row['R2']), 4)
+                }
+
+            S["model"] = model
+            S["results"] = results
+            S["final_cols"] = [c for c in df.columns if c != S["target"]]
+
+            st.write("📧 Sending results via email...")
+            if ENABLE_EMAIL and S.get("user_email"):
+                send_results_email(S["user_email"], "Surprise Me! Results", results)
+
+            status.update(label="✅ AutoML Complete!", state="complete", expanded=False)
+            st.success(f"Best model: {results['model']}")
+
+            # 5. Provide Download
+            st.write("💾 Saving model...")
+            tmp_name = "surprise_model.pkl"
+            joblib.dump(model, tmp_name)
+            with open(tmp_name, "rb") as f:
+                st.download_button("📥 Download Model (.pkl)", f, file_name=tmp_name, use_container_width=True)
+
+        except Exception as e:
+            status.update(label="❌ AutoML Failed", state="error")
+            st.error(f"Error: {str(e)}")
+
 @st.cache_data(show_spinner=False)
 def profile_html(df: pd.DataFrame) -> str:
     """Generate EDA report with error handling"""
@@ -339,6 +447,9 @@ def correlation_recommendations(df: pd.DataFrame, thresh=0.7):
         st.error(f"❌ Correlation analysis failed: {str(e)}")
         return []
 
+# ===================== PAGE CONFIG =====================
+st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
+
 # ===================== SESSION STATE =====================
 if "S" not in st.session_state:
     st.session_state.S = {
@@ -364,10 +475,7 @@ if "S" not in st.session_state:
     }
 S = st.session_state.S
 
-# ===================== PAGE CONFIG & THEME =====================
-# Set page layout to wide and move after session state
-st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
-
+# ===================== THEME =====================
 # Theme configuration based on Dark Mode
 bg_color = "#0f172a" if S.get("dark_mode") else "#f9fafb"
 text_color = "#f8fafc" if S.get("dark_mode") else "#0f172a"
@@ -573,54 +681,59 @@ with st.sidebar:
 # with the block-container CSS handling the internal scrolling for content overflow.
 
 if S["page"] == "chat":
-    st.title("💬 Chat with your Data (Rule-Based)")
+    st.title("💬 Chat with your Data")
 
     if S["df"] is None:
         st.info("📁 Upload a dataset first from the Dashboard to chat.")
         st.stop()
 
+    if not TRANSFORMERS_OK:
+        st.warning("⚠️ Transformers library not available. Using limited chat mode.")
+
     # Initialize chat history
     if "chat_history" not in S:
         S["chat_history"] = []
 
-    # Pre-determined options
-    options = [
-        "Select a question...",
-        "What are the main trends?",
-        "How to handle missing values?",
-        "What is the distribution of my data?",
-        "How do I choose the best model?"
-    ]
-
-    # Use selectbox for predetermined questions
-    selected_question = st.selectbox("Ask a predefined question about your data:", options)
-
-    if st.button("Ask") and selected_question != "Select a question...":
-        S["chat_history"].append({"role": "user", "content": selected_question})
-
-        # Rule-based answers
-        answer = "I'm not sure how to answer that."
-        if selected_question == "What are the main trends?":
-            cols = ", ".join(S["df"].columns)
-            answer = f"Based on your dataset with columns ({cols}), the main trends typically involve exploring the distribution of numerical features and the frequency of categorical features using the EDA tools on the Exploratory Analysis tab."
-        elif selected_question == "How to handle missing values?":
-            answer = "Handling missing values involves either dropping rows/columns with excessive missing data, or imputing them (e.g. replacing with mean/median for numerical data, or mode for categorical data). You can do this in the Pipeline & Preprocessing tab."
-        elif selected_question == "What is the distribution of my data?":
-            answer = "Data distribution gives insights into the central tendency and spread of your data. Check the Dashboard's automated pandas-profiling report or use custom visualizations to see if your variables follow a normal distribution."
-        elif selected_question == "How do I choose the best model?":
-            answer = "Model selection depends on the task (Regression vs Classification) and the data. For general tasks, Random Forest and XGBoost are excellent starting points. Use the Training & Experiments tab to compare different models automatically."
-
-        S["chat_history"].append({"role": "assistant", "content": answer})
-
-    # Display chat messages
+    # Display chat history
     for message in S["chat_history"]:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
+
+    # Chat input
+    if prompt := st.chat_input("Ask me about your data..."):
+        S["chat_history"].append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+
+        with st.chat_message("assistant"):
+            if TRANSFORMERS_OK:
+                with st.spinner("AI is thinking..."):
+                    try:
+                        generator = get_ai_pipeline()
+                        # Construct a context-aware prompt
+                        df_summary = S["df"].describe().to_string()
+                        full_prompt = f"Dataset Summary:\n{df_summary[:500]}\n\nUser Question: {prompt}\nAnswer:"
+
+                        response = generator(full_prompt, max_new_tokens=100, num_return_sequences=1)[0]['generated_text']
+                        answer = response.split("Answer:")[-1].strip()
+                    except Exception as e:
+                        answer = f"Error generating response: {str(e)}"
+            else:
+                # Fallback to simple logic if transformers not available
+                answer = "I'm currently in limited mode. Please upload data or check your installation."
+
+            st.markdown(answer)
+            S["chat_history"].append({"role": "assistant", "content": answer})
 
 elif S["page"] == "dashboard":
 
     st.title("📁 Dashboard")
     
+    # Quick Actions
+    if S["df"] is not None:
+        if st.button("✨ Surprise Me! (Quick AutoML)", type="primary", use_container_width=True):
+            run_surprise_me()
+
     col1, col2 = st.columns([2.2, 1])
     
     with col1:
@@ -696,9 +809,9 @@ elif S["page"] == "dashboard":
             with st.expander("📋 Column Info"):
                 col_info = pd.DataFrame({
                     'Column': S["df"].columns,
-                    'Type': S["df"].dtypes,
-                    'Missing': S["df"].isnull().sum(),
-                    'Unique': S["df"].nunique()
+                    'Type': [str(t) for t in S["df"].dtypes],
+                    'Missing': S["df"].isnull().sum().values,
+                    'Unique': S["df"].nunique().values
                 })
                 st.dataframe(col_info, use_container_width=True)
     
