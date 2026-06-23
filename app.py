@@ -82,6 +82,9 @@ import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# Set page layout to wide - MUST be first Streamlit command
+st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
+
 # ===================== SECURITY: EMAIL CONFIG =====================
 # IMPORTANT: Never hardcode credentials in production!
 # We now use Streamlit secrets for better security.
@@ -110,6 +113,15 @@ def get_ai_pipeline():
         return pipeline("text-generation", model="distilgpt2", device=-1)
     except Exception as e:
         st.error(f"Failed to load AI pipeline: {str(e)}")
+        return None
+
+@st.cache_resource
+def get_vision_pipeline():
+    """Load Image Classification model for Vision Lab"""
+    try:
+        return pipeline("image-classification", model="google/vit-base-patch16-224", device=-1)
+    except Exception as e:
+        st.error(f"Failed to load Vision pipeline: {str(e)}")
         return None
 
 def process_zip_images(uploaded_zip):
@@ -156,9 +168,13 @@ def generate_colab_notebook(task, target, email=""):
                     if 'target_column =' in line:
                         new_source.append(f"target_column = '{target}' # @param {{type:\"string\"}}\n")
                     elif 'task_type =' in line:
-                        new_source.append(f"task_type = '{task.lower()}' # @param [\"classification\", \"regression\"]\n")
+                        new_source.append(f"task_type = '{str(task).lower()}' # @param [\"classification\", \"regression\"]\n")
                     elif 'recipient_email =' in line:
                         new_source.append(f"recipient_email = '{email}' # @param {{type:\"string\"}}\n")
+                    elif 'sender_email =' in line:
+                        new_source.append(f"sender_email = '' # @param {{type:\"string\"}}\n")
+                    elif 'sender_password =' in line:
+                        new_source.append(f"sender_password = '' # @param {{type:\"string\"}}\n")
                     else:
                         new_source.append(line)
                 cell['source'] = new_source
@@ -193,33 +209,43 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
         msg["From"] = f"{SENDER_NAME} <{OWNER_ALIAS}>"
         msg["To"] = to_email
         
+        task_type = str(results.get('task', 'N/A')).lower()
+
+        # Build metrics table
+        metrics_html = "<table style='width:100%; border-collapse:collapse; margin:16px 0;'>"
+        metrics_html += "<tr style='background:#f3f4f6; text-align:left;'><th style='padding:8px; border:1px solid #e5e7eb;'>Metric</th><th style='padding:8px; border:1px solid #e5e7eb;'>Value</th></tr>"
+
+        for k, v in results.items():
+            if k not in ['pycaret_leaderboard', 'classification_report', 'parameters']:
+                display_val = f"{v*100:.2f}%" if k in ['accuracy', 'f1_score'] else str(v)
+                metrics_html += f"<tr><td style='padding:8px; border:1px solid #e5e7eb;'>{k.replace('_', ' ').title()}</td><td style='padding:8px; border:1px solid #e5e7eb;'>{display_val}</td></tr>"
+        metrics_html += "</table>"
+
         html_body = f"""
         <html>
-        <body style='font-family:Inter,system-ui; padding:20px; background:#f0f2f6;'>
-          <div style='max-width:600px; margin:0 auto; background:white; padding:32px; border-radius:4px; border: 1px solid #e1e4e8;'>
+        <body style='font-family:Inter,system-ui,sans-serif; padding:20px; background:#f0f2f6;'>
+          <div style='max-width:600px; margin:0 auto; background:white; padding:32px; border-radius:12px; border: 1px solid #e1e4e8; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);'>
             <div style='text-align:center; margin-bottom:24px;'>
                 <h1 style='color:#7c3aed; margin:0; font-size:28px;'>🚀 AutoMLPilot Pro</h1>
                 <p style='color:#6b7280; margin:4px 0 0 0;'>Your Automated Machine Learning Report</p>
             </div>
 
-            <div style='background:#f9fafb; padding:20px; border-radius:12px; margin-bottom:24px; border-left: 4px solid #7c3aed;'>
+            <div style='background:#f9fafb; padding:24px; border-radius:12px; margin-bottom:24px; border-left: 4px solid #7c3aed;'>
                 <h3 style='margin-top:0; color:#1f2937;'>📊 Model Summary</h3>
                 <p style='margin:4px 0;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
                 <p style='margin:4px 0;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
-                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task') == "Classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
+                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if 'classification' in task_type else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
             </div>
 
             {extra_html}
 
-            <h3 style='color:#1f2937; margin-bottom:12px;'>📋 Detailed Metrics</h3>
-            <pre style='background:#1e293b; color:#f8fafc; border:1px solid #334155; padding:20px; border-radius:12px; overflow-x:auto; font-size:13px; line-height:1.5;'>
-{json.dumps(results, indent=2)}
-            </pre>
+            <h3 style='color:#1f2937; margin-bottom:12px;'>📋 Key Performance Indicators</h3>
+            {metrics_html}
 
             <div style='text-align:center; margin-top:32px; padding-top:24px; border-top:1px solid #e1e4e8;'>
                 <p style='color:#94a3b8; font-size:12px; margin:0;'>
-                  This report was generated automatically by AutoMLPilot Pro.<br>
-                  &copy; 2024 AutoMLPilot AI Labs
+                  This report was generated automatically by AutoMLPilot Pro AI Labs.<br>
+                  &copy; 2024-2025 AutoMLPilot
                 </p>
             </div>
           </div>
@@ -347,13 +373,12 @@ if "S" not in st.session_state:
         "preprocessing_steps": [],
         "chat_history": [],
         "leaderboard": [],
-        "dark_mode": False
+        "dark_mode": False,
+        "processed_images": []
     }
 S = st.session_state.S
 
 # ===================== PAGE CONFIG & THEME =====================
-# Set page layout to wide and move after session state
-st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
 
 # Theme configuration based on Dark Mode
 bg_color = "#0f172a" if S.get("dark_mode") else "#f9fafb"
@@ -427,6 +452,10 @@ THEME = f"""
     h1,h2,h3,h4,h5,h6,p,span,label {{
         color: var(--text) !important;
     }}
+
+    h1 {{ font-size: 2.2rem !important; margin-bottom: 1rem !important; }}
+    h2 {{ font-size: 1.8rem !important; margin-bottom: 0.8rem !important; }}
+    h3 {{ font-size: 1.5rem !important; margin-bottom: 0.6rem !important; }}
 
     .card {{
         background: var(--card);
@@ -523,9 +552,10 @@ with st.sidebar:
     st.markdown("---")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "vision", "chat", "preprocess", "train", "results", "deployment", "playground", "unsupervised", "help"]
     nav_labels = {
         "dashboard": "🗄️ Data Management",
+        "vision": "👁️ Vision Lab",
         "chat": "📊 Exploratory Analysis",
         "preprocess": "🧬 Pipeline & Preprocessing",
         "train": "🧪 Training & Experiments",
@@ -603,6 +633,60 @@ if S["page"] == "chat":
                 st.markdown(answer)
                 S["chat_history"].append({"role": "assistant", "content": answer})
 
+elif S["page"] == "vision":
+    st.title("👁️ Vision Lab (AI Image Classification)")
+    st.markdown("### Classify images directly in your browser")
+
+    if not S.get("processed_images"):
+        st.info("🖼️ No images found. Upload a ZIP or single images from the **Dashboard** first.")
+        st.stop()
+
+    if not TRANSFORMERS_OK:
+        st.error("❌ Transformers library not available. Please install `transformers` and `torch`.")
+        st.stop()
+
+    # Image selection
+    img_names = [name for name, _ in S["processed_images"]]
+    selected_img_name = st.selectbox("Select an image to analyze", img_names)
+
+    # Find selected image
+    selected_img = None
+    for name, img in S["processed_images"]:
+        if name == selected_img_name:
+            selected_img = img
+            break
+
+    if selected_img:
+        col1, col2 = st.columns([1, 1])
+
+        with col1:
+            st.image(selected_img, caption=selected_img_name, use_container_width=True)
+
+        with col2:
+            if st.button("🤖 Run AI Classification", type="primary"):
+                with st.spinner("Analyzing image..."):
+                    try:
+                        classifier = get_vision_pipeline()
+                        if classifier:
+                            results = classifier(selected_img)
+
+                            st.markdown("#### 📊 Prediction Results")
+                            for res in results:
+                                label = res['label']
+                                score = res['score']
+                                st.markdown(f"**{label}**: `{score*100:.2f}%`")
+                                st.progress(score)
+                        else:
+                            st.error("Failed to initialize Vision pipeline.")
+                    except Exception as e:
+                        st.error(f"Vision AI Error: {str(e)}")
+
+    st.markdown("---")
+    st.markdown("### 🖼️ All Processed Images")
+    cols = st.columns(6)
+    for i, (name, img) in enumerate(S["processed_images"]):
+        cols[i % 6].image(img, caption=name[:15], use_container_width=True)
+
 elif S["page"] == "dashboard":
 
     st.title("📁 Dashboard")
@@ -643,14 +727,18 @@ elif S["page"] == "dashboard":
                         st.error(f"❌ Failed to process zip: {res}")
                     else:
                         st.success(f"✅ Extracted and resized {len(res)} images to 224x224.")
-                        S["processed_images"] = res
+                        # Append new images to existing list if any
+                        S["processed_images"].extend(res)
                         cols = st.columns(4)
                         for i, (name, img) in enumerate(res[:12]): # display up to 12
                             cols[i % 4].image(img, caption=name, use_container_width=True)
             elif file_type in ['png', 'jpg', 'jpeg']:
                 try:
-                    img = Image.open(uploaded_file)
-                    st.image(img, caption="Uploaded Image", use_container_width=True)
+                    img = Image.open(uploaded_file).copy()
+                    img = img.resize((224, 224))
+                    S["processed_images"].append((uploaded_file.name, img))
+                    st.image(img, caption="Uploaded Image (resized to 224x224)", use_container_width=True)
+                    st.success(f"✅ Image '{uploaded_file.name}' added to Vision Lab.")
                 except Exception as e:
                     st.error(f"❌ Failed to open image: {str(e)}")
             elif file_type == 'mp4':
@@ -682,9 +770,9 @@ elif S["page"] == "dashboard":
             with st.expander("📋 Column Info"):
                 col_info = pd.DataFrame({
                     'Column': S["df"].columns,
-                    'Type': S["df"].dtypes,
-                    'Missing': S["df"].isnull().sum(),
-                    'Unique': S["df"].nunique()
+                    'Type': [str(t) for t in S["df"].dtypes],
+                    'Missing': S["df"].isnull().sum().values,
+                    'Unique': S["df"].nunique().values
                 })
                 st.dataframe(col_info, use_container_width=True)
     
@@ -755,13 +843,13 @@ elif S["page"] == "dashboard":
                         best = cls_compare(verbose=False)
                         model = cls_finalize(best)
                         metrics = cls_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1": metrics.get("F1", 0), "task": "Classification"}
+                        res_summary = {"model": str(best).split("(")[0], "accuracy": float(metrics.get("Accuracy", 0)), "f1_score": float(metrics.get("F1", 0)), "task": "Classification"}
                     else:
                         reg_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
                         best = reg_compare(verbose=False)
                         model = reg_finalize(best)
                         metrics = reg_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "r2": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
+                        res_summary = {"model": str(best).split("(")[0], "r2_score": float(metrics.get("R2", 0)), "rmse": float(metrics.get("RMSE", 0)), "task": "Regression"}
 
                     # 5. Store results
                     S["model"] = model
@@ -2325,6 +2413,19 @@ elif S["page"] == "deployment":
                     st.success("✅ Model imported from URL!")
                 except Exception as e:
                     st.error(f"❌ URL import failed: {str(e)}")
+
+        st.markdown("#### 📄 Model Metadata")
+        meta_file = st.file_uploader("Upload model_metadata.json (Optional)", type=["json"])
+        if meta_file:
+            try:
+                metadata = json.load(meta_file)
+                if "features" in metadata:
+                    features = metadata["features"]
+                    st.success(f"✅ Metadata loaded! Found {len(features)} features.")
+                if "task" in metadata:
+                    S["task"] = metadata["task"]
+            except Exception as e:
+                st.error(f"❌ Failed to load metadata: {str(e)}")
 
         # Feature detection for uploaded/URL models
         if model and not features:
