@@ -3,6 +3,7 @@
 # Enhanced with proper error handling, security, and no data leakage
 
 import streamlit as st
+st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -147,6 +148,11 @@ def generate_colab_notebook(task, target, email=""):
         with open("notebooks/training_template.ipynb", "r") as f:
             notebook = json.load(f)
 
+        # Inject dynamic context
+        df_context = ""
+        if S.get("df") is not None:
+            df_context = f"# Dataset Summary:\n# {S['df'].describe().to_string()[:500]}"
+
         # Update markers in the template
         for cell in notebook['cells']:
             if cell['cell_type'] == 'code':
@@ -159,6 +165,10 @@ def generate_colab_notebook(task, target, email=""):
                         new_source.append(f"task_type = '{task.lower()}' # @param [\"classification\", \"regression\"]\n")
                     elif 'recipient_email =' in line:
                         new_source.append(f"recipient_email = '{email}' # @param {{type:\"string\"}}\n")
+                    elif '# @title 2. Load Dataset' in line:
+                        new_source.append(line)
+                        if df_context:
+                            new_source.append(f"{df_context}\n")
                     else:
                         new_source.append(line)
                 cell['source'] = new_source
@@ -204,9 +214,11 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
 
             <div style='background:#f9fafb; padding:20px; border-radius:12px; margin-bottom:24px; border-left: 4px solid #7c3aed;'>
                 <h3 style='margin-top:0; color:#1f2937;'>📊 Model Summary</h3>
-                <p style='margin:4px 0;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
-                <p style='margin:4px 0;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
-                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task') == "Classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
+                <table style='width:100%; border-collapse: collapse;'>
+                    <tr><td style='padding:8px 0; border-bottom:1px solid #e1e4e8;'><strong>Model:</strong></td><td style='padding:8px 0; border-bottom:1px solid #e1e4e8; text-align:right;'>{results.get('model', 'N/A')}</td></tr>
+                    <tr><td style='padding:8px 0; border-bottom:1px solid #e1e4e8;'><strong>Task:</strong></td><td style='padding:8px 0; border-bottom:1px solid #e1e4e8; text-align:right;'>{results.get('task', 'N/A')}</td></tr>
+                    {f"<tr><td style='padding:8px 0; border-bottom:1px solid #e1e4e8;'><strong>Accuracy:</strong></td><td style='padding:8px 0; border-bottom:1px solid #e1e4e8; text-align:right;'>{results.get('accuracy', 0)*100:.2f}%</td></tr>" if str(results.get('task')).lower() == "classification" else f"<tr><td style='padding:8px 0; border-bottom:1px solid #e1e4e8;'><strong>R² Score:</strong></td><td style='padding:8px 0; border-bottom:1px solid #e1e4e8; text-align:right;'>{results.get('r2_score', 0):.4f}</td></tr>"}
+                </table>
             </div>
 
             {extra_html}
@@ -352,9 +364,6 @@ if "S" not in st.session_state:
 S = st.session_state.S
 
 # ===================== PAGE CONFIG & THEME =====================
-# Set page layout to wide and move after session state
-st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
-
 # Theme configuration based on Dark Mode
 bg_color = "#0f172a" if S.get("dark_mode") else "#f9fafb"
 text_color = "#f8fafc" if S.get("dark_mode") else "#0f172a"
@@ -424,7 +433,10 @@ THEME = f"""
         z-index: 990;
     }}
 
-    h1,h2,h3,h4,h5,h6,p,span,label {{
+    h1,h2,h3,h4,h5,h6 {{
+        color: var(--text) !important;
+    }}
+    p,span,label {{
         color: var(--text) !important;
     }}
 
@@ -523,17 +535,18 @@ with st.sidebar:
     st.markdown("---")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "vision", "chat", "preprocess", "train", "results", "deployment", "playground", "unsupervised", "help"]
     nav_labels = {
-        "dashboard": "🗄️ Data Management",
+        "dashboard": "📂 Data Management",
+        "vision": "👁️ Vision Lab",
         "chat": "📊 Exploratory Analysis",
-        "preprocess": "🧬 Pipeline & Preprocessing",
-        "train": "🧪 Training & Experiments",
+        "preprocess": "🧪 Pipeline & Preprocessing",
+        "train": "🔬 Training & Experiments",
         "results": "📈 Evaluation & Metrics",
         "deployment": "🚀 Model Deployment",
         "playground": "➕ New Experiment",
         "unsupervised": "⚙️ Settings",
-        "help": "📖 Documentation"
+        "help": "❓ Help & Documentation"
     }
     
     pg = st.radio(
@@ -559,12 +572,47 @@ with st.sidebar:
 # The content below is contained within the single non-scrolling Streamlit 'main' area,
 # with the block-container CSS handling the internal scrolling for content overflow.
 
-if S["page"] == "chat":
+if S["page"] == "vision":
+    st.title("👁️ Vision Lab")
+    st.markdown("### Browser-based Image Classification")
+
+    if not S.get("processed_images"):
+        st.info("📂 Upload a ZIP of images or single images on the Dashboard to begin.")
+        st.stop()
+
+    @st.cache_resource
+    def get_vision_pipeline():
+        try:
+            return pipeline("image-classification", model="google/vit-base-patch16-224")
+        except Exception as e:
+            st.error(f"Failed to load Vision pipeline: {str(e)}")
+            return None
+
+    classifier = get_vision_pipeline()
+
+    if classifier:
+        cols = st.columns(3)
+        for i, (name, img) in enumerate(S["processed_images"]):
+            with cols[i % 3]:
+                st.image(img, caption=name, use_container_width=True)
+                if st.button(f"Analyze {name}", key=f"clf_{i}"):
+                    with st.spinner("Classifying..."):
+                        results = classifier(img)
+                        for res in results:
+                            st.write(f"**{res['label']}**: {res['score']:.2%}")
+    else:
+        st.error("Vision AI pipeline is not available.")
+
+elif S["page"] == "chat":
     st.title("💬 Chat with your Data (AI-Powered)")
 
     if S["df"] is None:
         st.info("📁 Upload a dataset first from the Dashboard to chat.")
         st.stop()
+
+    if st.button("🗑️ Clear Chat"):
+        S["chat_history"] = []
+        st.rerun()
 
     # Initialize chat history
     if "chat_history" not in S:
@@ -586,9 +634,10 @@ if S["page"] == "chat":
                     try:
                         generator = get_ai_pipeline()
                         # context from dataframe
-                        df_summary = S["df"].describe().to_string()[:500]
+                        df_summary = S["df"].describe().to_string()[:400]
+                        dtypes = ", ".join([f"{c}({t})" for c, t in zip(S["df"].columns, S["df"].dtypes)])
                         cols = ", ".join(S["df"].columns)
-                        ai_prompt = f"Context: Dataset with columns {cols}. Summary: {df_summary}\nUser Question: {prompt}\nAI Answer:"
+                        ai_prompt = f"Context: Dataset with columns {cols} and types {dtypes}. Summary: {df_summary}\nUser Question: {prompt}\nAI Answer:"
 
                         response = generator(ai_prompt, max_new_tokens=100, do_sample=True, temperature=0.7)[0]['generated_text']
                         answer = response.split("AI Answer:")[-1].strip()
@@ -649,8 +698,12 @@ elif S["page"] == "dashboard":
                             cols[i % 4].image(img, caption=name, use_container_width=True)
             elif file_type in ['png', 'jpg', 'jpeg']:
                 try:
-                    img = Image.open(uploaded_file)
+                    img = Image.open(uploaded_file).copy()
+                    img_resized = img.resize((224, 224))
+                    if "processed_images" not in S: S["processed_images"] = []
+                    S["processed_images"].append((uploaded_file.name, img_resized))
                     st.image(img, caption="Uploaded Image", use_container_width=True)
+                    st.success(f"✅ Image added to Vision Lab.")
                 except Exception as e:
                     st.error(f"❌ Failed to open image: {str(e)}")
             elif file_type == 'mp4':
@@ -681,10 +734,10 @@ elif S["page"] == "dashboard":
             # Data types
             with st.expander("📋 Column Info"):
                 col_info = pd.DataFrame({
-                    'Column': S["df"].columns,
-                    'Type': S["df"].dtypes,
-                    'Missing': S["df"].isnull().sum(),
-                    'Unique': S["df"].nunique()
+                    'Column': [str(c) for c in S["df"].columns],
+                    'Type': [str(t) for t in S["df"].dtypes],
+                    'Missing': S["df"].isnull().sum().values,
+                    'Unique': S["df"].nunique().values
                 })
                 st.dataframe(col_info, use_container_width=True)
     
@@ -736,15 +789,7 @@ elif S["page"] == "dashboard":
                     # 1. Simple target detection (last column)
                     target = df_work.columns[-1]
 
-                    # 2. Basic Preprocessing
-                    num_cols = df_work.select_dtypes(include=[np.number]).columns.tolist()
-                    if target in num_cols: num_cols.remove(target)
-
-                    if num_cols:
-                        imputer = SimpleImputer(strategy="median")
-                        df_work[num_cols] = imputer.fit_transform(df_work[num_cols])
-
-                    # 3. Detect Task
+                    # 2. Detect Task
                     n_unique = df_work[target].nunique()
                     is_numeric = pd.api.types.is_numeric_dtype(df_work[target])
                     task_type = "classification" if not is_numeric or n_unique <= 20 else "regression"
@@ -772,7 +817,23 @@ elif S["page"] == "dashboard":
 
                     st.success(f"✅ Quick AutoML complete! Best Model: **{res_summary['model']}**")
 
-                    # 6. Email Results
+                    # 6. Model Download
+                    model_path = "best_model_surprise"
+                    if res_summary["task"] == "Classification":
+                        cls_save(model, model_path)
+                    else:
+                        reg_save(model, model_path)
+
+                    with open(f"{model_path}.pkl", "rb") as f:
+                        st.download_button(
+                            label="📥 Download Best Model (.pkl)",
+                            data=f,
+                            file_name="auto_model.pkl",
+                            mime="application/octet-stream",
+                            use_container_width=True
+                        )
+
+                    # 7. Email Results
                     if ENABLE_EMAIL and S.get("user_email"):
                         send_results_email(S["user_email"], "🚀 Your 'Surprise Me' AutoML Results", res_summary)
                         st.info(f"📧 Results sent to {S['user_email']}")
@@ -2325,6 +2386,20 @@ elif S["page"] == "deployment":
                     st.success("✅ Model imported from URL!")
                 except Exception as e:
                     st.error(f"❌ URL import failed: {str(e)}")
+
+        st.markdown("---")
+        st.markdown("#### 📄 Model Metadata (Optional)")
+        uploaded_meta = st.file_uploader("Upload metadata .json (optional)", type=["json"])
+        if uploaded_meta:
+            try:
+                meta = json.load(uploaded_meta)
+                if "features" in meta:
+                    features = meta["features"]
+                    st.success("✅ Features mapped from metadata!")
+                if "encoders" in meta:
+                    S["label_encoders"] = meta["encoders"]
+            except Exception as e:
+                st.error(f"❌ Metadata load failed: {str(e)}")
 
         # Feature detection for uploaded/URL models
         if model and not features:
