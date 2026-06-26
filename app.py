@@ -3,6 +3,7 @@
 # Enhanced with proper error handling, security, and no data leakage
 
 import streamlit as st
+st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -112,15 +113,24 @@ def get_ai_pipeline():
         st.error(f"Failed to load AI pipeline: {str(e)}")
         return None
 
+@st.cache_resource
+def get_vision_pipeline():
+    """Load vision model for image classification"""
+    try:
+        return pipeline("image-classification", model="google/vit-base-patch16-224", device=-1)
+    except Exception as e:
+        st.error(f"Failed to load Vision pipeline: {str(e)}")
+        return None
+
 def process_zip_images(uploaded_zip):
     processed_images = []
     try:
         with zipfile.ZipFile(uploaded_zip, "r") as z:
             for file_info in z.infolist():
-                if file_info.filename.lower().endswith(('png', 'jpg', 'jpeg')):
+                if file_info.filename.lower().endswith(('png', 'jpg', 'jpeg')) and not file_info.filename.startswith('__MACOSX'):
                     with z.open(file_info) as file:
                         try:
-                            img = Image.open(file).copy()
+                            img = Image.open(file).copy().convert("RGB")
                             img = img.resize((224, 224))
                             processed_images.append((file_info.filename, img))
                         except Exception as e:
@@ -147,6 +157,14 @@ def generate_colab_notebook(task, target, email=""):
         with open("notebooks/training_template.ipynb", "r") as f:
             notebook = json.load(f)
 
+        # Prepare context for AI injection
+        df_summary = "N/A"
+        if S["df"] is not None:
+            try:
+                df_summary = S["df"].describe().to_string()
+            except Exception:
+                pass
+
         # Update markers in the template
         for cell in notebook['cells']:
             if cell['cell_type'] == 'code':
@@ -159,6 +177,8 @@ def generate_colab_notebook(task, target, email=""):
                         new_source.append(f"task_type = '{task.lower()}' # @param [\"classification\", \"regression\"]\n")
                     elif 'recipient_email =' in line:
                         new_source.append(f"recipient_email = '{email}' # @param {{type:\"string\"}}\n")
+                    elif 'df_summary =' in line:
+                        new_source.append(f"df_summary = \"\"\"{df_summary}\"\"\" # @param {{type:\"string\"}}\n")
                     else:
                         new_source.append(line)
                 cell['source'] = new_source
@@ -352,9 +372,6 @@ if "S" not in st.session_state:
 S = st.session_state.S
 
 # ===================== PAGE CONFIG & THEME =====================
-# Set page layout to wide and move after session state
-st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
-
 # Theme configuration based on Dark Mode
 bg_color = "#0f172a" if S.get("dark_mode") else "#f9fafb"
 text_color = "#f8fafc" if S.get("dark_mode") else "#0f172a"
@@ -523,17 +540,18 @@ with st.sidebar:
     st.markdown("---")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "vision", "chat", "preprocess", "train", "results", "deployment", "playground", "unsupervised", "help"]
     nav_labels = {
-        "dashboard": "🗄️ Data Management",
+        "dashboard": "📂 Data Management",
+        "vision": "👁️ Vision Lab",
         "chat": "📊 Exploratory Analysis",
-        "preprocess": "🧬 Pipeline & Preprocessing",
-        "train": "🧪 Training & Experiments",
+        "preprocess": "🧪 Pipeline & Preprocessing",
+        "train": "🔬 Training & Experiments",
         "results": "📈 Evaluation & Metrics",
         "deployment": "🚀 Model Deployment",
         "playground": "➕ New Experiment",
         "unsupervised": "⚙️ Settings",
-        "help": "📖 Documentation"
+        "help": "❓ Help & Documentation"
     }
     
     pg = st.radio(
@@ -559,7 +577,28 @@ with st.sidebar:
 # The content below is contained within the single non-scrolling Streamlit 'main' area,
 # with the block-container CSS handling the internal scrolling for content overflow.
 
-if S["page"] == "chat":
+if S["page"] == "vision":
+    st.title("👁️ Vision Lab")
+    st.markdown("### Browser-based Image Classification")
+
+    if not S.get("processed_images"):
+        st.info("📂 Please upload images or a ZIP file on the Dashboard first.")
+    else:
+        vision_model = get_vision_pipeline()
+        if vision_model:
+            cols = st.columns(3)
+            for i, (name, img) in enumerate(S["processed_images"]):
+                with cols[i % 3]:
+                    st.image(img, caption=name, use_container_width=True)
+                    if st.button(f"Analyze {name}", key=f"vision_{i}"):
+                        with st.spinner("Classifying..."):
+                            predictions = vision_model(img)
+                            for pred in predictions:
+                                st.write(f"**{pred['label']}**: {pred['score']:.2%}")
+        else:
+            st.error("❌ Vision model not available.")
+
+elif S["page"] == "chat":
     st.title("💬 Chat with your Data (AI-Powered)")
 
     if S["df"] is None:
@@ -586,9 +625,14 @@ if S["page"] == "chat":
                     try:
                         generator = get_ai_pipeline()
                         # context from dataframe
-                        df_summary = S["df"].describe().to_string()[:500]
-                        cols = ", ".join(S["df"].columns)
-                        ai_prompt = f"Context: Dataset with columns {cols}. Summary: {df_summary}\nUser Question: {prompt}\nAI Answer:"
+                        df_summary = S["df"].describe().to_string()[:600]
+                        cols_info = ", ".join([f"{col} ({dtype})" for col, dtype in zip(S["df"].columns, S["df"].dtypes)])
+                        ai_prompt = (
+                            f"You are a helpful data science assistant. Dataset Columns: {cols_info}. "
+                            f"Statistical Summary: {df_summary}\n"
+                            f"User Question: {prompt}\n"
+                            f"AI Answer:"
+                        )
 
                         response = generator(ai_prompt, max_new_tokens=100, do_sample=True, temperature=0.7)[0]['generated_text']
                         answer = response.split("AI Answer:")[-1].strip()
@@ -649,8 +693,11 @@ elif S["page"] == "dashboard":
                             cols[i % 4].image(img, caption=name, use_container_width=True)
             elif file_type in ['png', 'jpg', 'jpeg']:
                 try:
-                    img = Image.open(uploaded_file)
+                    img = Image.open(uploaded_file).convert("RGB")
+                    resized_img = img.resize((224, 224))
+                    S["processed_images"] = [(uploaded_file.name, resized_img)]
                     st.image(img, caption="Uploaded Image", use_container_width=True)
+                    st.success("✅ Image uploaded and prepared for Vision Lab.")
                 except Exception as e:
                     st.error(f"❌ Failed to open image: {str(e)}")
             elif file_type == 'mp4':
@@ -736,32 +783,34 @@ elif S["page"] == "dashboard":
                     # 1. Simple target detection (last column)
                     target = df_work.columns[-1]
 
-                    # 2. Basic Preprocessing
-                    num_cols = df_work.select_dtypes(include=[np.number]).columns.tolist()
-                    if target in num_cols: num_cols.remove(target)
-
-                    if num_cols:
-                        imputer = SimpleImputer(strategy="median")
-                        df_work[num_cols] = imputer.fit_transform(df_work[num_cols])
-
-                    # 3. Detect Task
+                    # 2. Detect Task
                     n_unique = df_work[target].nunique()
                     is_numeric = pd.api.types.is_numeric_dtype(df_work[target])
                     task_type = "classification" if not is_numeric or n_unique <= 20 else "regression"
 
-                    # 4. PyCaret AutoML
+                    # 3. PyCaret AutoML
                     if task_type == "classification":
                         cls_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
                         best = cls_compare(verbose=False)
                         model = cls_finalize(best)
                         metrics = cls_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1": metrics.get("F1", 0), "task": "Classification"}
+                        res_summary = {
+                            "model": str(best).split("(")[0],
+                            "accuracy": metrics.get("Accuracy", 0),
+                            "f1_score": metrics.get("F1", 0),
+                            "task": "Classification"
+                        }
                     else:
                         reg_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
                         best = reg_compare(verbose=False)
                         model = reg_finalize(best)
                         metrics = reg_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "r2": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
+                        res_summary = {
+                            "model": str(best).split("(")[0],
+                            "r2_score": metrics.get("R2", 0),
+                            "rmse": metrics.get("RMSE", 0),
+                            "task": "Regression"
+                        }
 
                     # 5. Store results
                     S["model"] = model
@@ -771,6 +820,17 @@ elif S["page"] == "dashboard":
                     S["final_cols"] = [c for c in df_work.columns if c != target]
 
                     st.success(f"✅ Quick AutoML complete! Best Model: **{res_summary['model']}**")
+
+                    # 5.1 Download Button
+                    model_buffer = io.BytesIO()
+                    joblib.dump(model, model_buffer)
+                    st.download_button(
+                        label="📥 Download Trained Model (.pkl)",
+                        data=model_buffer.getvalue(),
+                        file_name=f"surprise_me_model_{res_summary['model']}.pkl",
+                        mime="application/octet-stream",
+                        use_container_width=True
+                    )
 
                     # 6. Email Results
                     if ENABLE_EMAIL and S.get("user_email"):
