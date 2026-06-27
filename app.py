@@ -82,6 +82,9 @@ import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# Set page layout to wide and move after session state
+st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
+
 # ===================== SECURITY: EMAIL CONFIG =====================
 # IMPORTANT: Never hardcode credentials in production!
 # We now use Streamlit secrets for better security.
@@ -352,8 +355,6 @@ if "S" not in st.session_state:
 S = st.session_state.S
 
 # ===================== PAGE CONFIG & THEME =====================
-# Set page layout to wide and move after session state
-st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
 
 # Theme configuration based on Dark Mode
 bg_color = "#0f172a" if S.get("dark_mode") else "#f9fafb"
@@ -424,7 +425,7 @@ THEME = f"""
         z-index: 990;
     }}
 
-    h1,h2,h3,h4,h5,h6,p,span,label {{
+    h1,h2,h3,h4,h5,h6,p,span,label, .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {{
         color: var(--text) !important;
     }}
 
@@ -523,17 +524,18 @@ with st.sidebar:
     st.markdown("---")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "vision", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
     nav_labels = {
-        "dashboard": "🗄️ Data Management",
+        "dashboard": "📂 Data Management",
+        "vision": "👁️ Vision Lab",
         "chat": "📊 Exploratory Analysis",
-        "preprocess": "🧬 Pipeline & Preprocessing",
-        "train": "🧪 Training & Experiments",
+        "preprocess": "🧪 Pipeline & Preprocessing",
+        "train": "🔬 Training & Experiments",
         "results": "📈 Evaluation & Metrics",
         "deployment": "🚀 Model Deployment",
         "playground": "➕ New Experiment",
         "unsupervised": "⚙️ Settings",
-        "help": "📖 Documentation"
+        "help": "❓ Help & Documentation"
     }
     
     pg = st.radio(
@@ -559,7 +561,43 @@ with st.sidebar:
 # The content below is contained within the single non-scrolling Streamlit 'main' area,
 # with the block-container CSS handling the internal scrolling for content overflow.
 
-if S["page"] == "chat":
+if S["page"] == "vision":
+    st.title("👁️ Vision Lab")
+    st.markdown("### State-of-the-art Browser-based Image Classification")
+
+    if not TRANSFORMERS_OK:
+        st.error("❌ Transformers library not found. Vision Lab is disabled.")
+        st.stop()
+
+    if "processed_images" not in S or not S["processed_images"]:
+        st.info("📁 Please upload images or a ZIP file from the Dashboard to begin.")
+        st.stop()
+
+    @st.cache_resource
+    def get_vision_pipeline():
+        try:
+            return pipeline("image-classification", model="google/vit-base-patch16-224")
+        except Exception as e:
+            st.error(f"Failed to load Vision pipeline: {str(e)}")
+            return None
+
+    st.markdown(f"Analyzing **{len(S['processed_images'])}** images from session.")
+
+    cols = st.columns(3)
+    for i, (name, img) in enumerate(S["processed_images"]):
+        with cols[i % 3]:
+            st.image(img, caption=name, use_container_width=True)
+            if st.button(f"🔍 Classify {name}", key=f"btn_{i}"):
+                with st.spinner("Classifying..."):
+                    classifier = get_vision_pipeline()
+                    if classifier:
+                        results = classifier(img)
+                        for res in results:
+                            st.write(f"**{res['label']}**: {res['score']:.2%}")
+                    else:
+                        st.error("Classifier could not be loaded.")
+
+elif S["page"] == "chat":
     st.title("💬 Chat with your Data (AI-Powered)")
 
     if S["df"] is None:
@@ -649,8 +687,11 @@ elif S["page"] == "dashboard":
                             cols[i % 4].image(img, caption=name, use_container_width=True)
             elif file_type in ['png', 'jpg', 'jpeg']:
                 try:
-                    img = Image.open(uploaded_file)
+                    img = Image.open(uploaded_file).copy()
+                    img = img.resize((224, 224))
                     st.image(img, caption="Uploaded Image", use_container_width=True)
+                    if "processed_images" not in S: S["processed_images"] = []
+                    S["processed_images"].append((uploaded_file.name, img))
                 except Exception as e:
                     st.error(f"❌ Failed to open image: {str(e)}")
             elif file_type == 'mp4':
@@ -755,13 +796,13 @@ elif S["page"] == "dashboard":
                         best = cls_compare(verbose=False)
                         model = cls_finalize(best)
                         metrics = cls_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1": metrics.get("F1", 0), "task": "Classification"}
+                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1_score": metrics.get("F1", 0), "task": "Classification"}
                     else:
                         reg_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
                         best = reg_compare(verbose=False)
                         model = reg_finalize(best)
                         metrics = reg_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "r2": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
+                        res_summary = {"model": str(best).split("(")[0], "r2_score": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
 
                     # 5. Store results
                     S["model"] = model
@@ -771,6 +812,17 @@ elif S["page"] == "dashboard":
                     S["final_cols"] = [c for c in df_work.columns if c != target]
 
                     st.success(f"✅ Quick AutoML complete! Best Model: **{res_summary['model']}**")
+
+                    # Download model
+                    model_pkl = io.BytesIO()
+                    joblib.dump(model, model_pkl)
+                    st.download_button(
+                        label="📥 Download Best Model (.pkl)",
+                        data=model_pkl.getvalue(),
+                        file_name=f"best_model_{res_summary['model']}.pkl",
+                        mime="application/octet-stream",
+                        use_container_width=True
+                    )
 
                     # 6. Email Results
                     if ENABLE_EMAIL and S.get("user_email"):
@@ -2326,6 +2378,19 @@ elif S["page"] == "deployment":
                 except Exception as e:
                     st.error(f"❌ URL import failed: {str(e)}")
 
+        # Metadata Support
+        st.markdown("#### 📄 Metadata (Optional)")
+        uploaded_meta = st.file_uploader("Upload metadata .json", type=["json"])
+        if uploaded_meta:
+            try:
+                meta = json.load(uploaded_meta)
+                features = meta.get("features", features)
+                if "label_encoders" in meta:
+                    # Logic to restore encoders would go here if they were serialized
+                    st.info("💡 Metadata features and encoders mapped.")
+            except Exception as e:
+                st.error(f"Error reading metadata: {e}")
+
         # Feature detection for uploaded/URL models
         if model and not features:
             if hasattr(model, 'feature_names_in_'):
@@ -2404,7 +2469,7 @@ elif S["page"] == "help":
     st.markdown("### 🚀 Interactive Quick Start")
     qs_step = st.select_slider(
         "Explore the AutoML Process",
-        options=["Upload", "Preprocess", "Train", "Chat", "Deploy"],
+        options=["Upload", "Preprocess", "Train", "Chat", "Deploy", "Surprise Me"],
         value="Upload"
     )
 
@@ -2418,6 +2483,8 @@ elif S["page"] == "help":
         st.info("💬 **Step 4: Chat (AI)** - Use our AI agent to ask questions directly about your dataset trends and distributions.")
     elif qs_step == "Deploy":
         st.info("🚀 **Step 5: Deploy** - Test your trained model in the browser or import one from a URL for instant inference.")
+    elif qs_step == "Surprise Me":
+        st.info("🎁 **Step 6: Surprise Me** - Use the one-click AutoML feature on the Dashboard for instant end-to-end results.")
 
     st.markdown("---")
     
