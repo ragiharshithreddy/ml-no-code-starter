@@ -3,6 +3,10 @@
 # Enhanced with proper error handling, security, and no data leakage
 
 import streamlit as st
+
+# Set page layout to wide as the first Streamlit command
+st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
+
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -112,6 +116,15 @@ def get_ai_pipeline():
         st.error(f"Failed to load AI pipeline: {str(e)}")
         return None
 
+@st.cache_resource
+def get_vision_pipeline():
+    """Load ViT for image classification"""
+    try:
+        return pipeline("image-classification", model="google/vit-base-patch16-224", device=-1)
+    except Exception as e:
+        st.error(f"Failed to load Vision pipeline: {str(e)}")
+        return None
+
 def process_zip_images(uploaded_zip):
     processed_images = []
     try:
@@ -121,7 +134,8 @@ def process_zip_images(uploaded_zip):
                     with z.open(file_info) as file:
                         try:
                             img = Image.open(file).copy()
-                            img = img.resize((224, 224))
+                            # Do not resize here, let Vision Lab handle it if needed
+                            # img = img.resize((224, 224))
                             processed_images.append((file_info.filename, img))
                         except Exception as e:
                             pass
@@ -159,6 +173,11 @@ def generate_colab_notebook(task, target, email=""):
                         new_source.append(f"task_type = '{task.lower()}' # @param [\"classification\", \"regression\"]\n")
                     elif 'recipient_email =' in line:
                         new_source.append(f"recipient_email = '{email}' # @param {{type:\"string\"}}\n")
+                    elif 'df = pd.read_csv(filename)' in line:
+                        new_source.append(line)
+                        if S["df"] is not None:
+                            summary = S["df"].describe().to_string().replace("'", "\\'")
+                            new_source.append(f"\n# Dataset Context (AI Insights)\n# {summary[:500]}\n")
                     else:
                         new_source.append(line)
                 cell['source'] = new_source
@@ -346,15 +365,13 @@ if "S" not in st.session_state:
         "unsup_labels": None,
         "preprocessing_steps": [],
         "chat_history": [],
+        "processed_images": [],
         "leaderboard": [],
         "dark_mode": False
     }
 S = st.session_state.S
 
 # ===================== PAGE CONFIG & THEME =====================
-# Set page layout to wide and move after session state
-st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
-
 # Theme configuration based on Dark Mode
 bg_color = "#0f172a" if S.get("dark_mode") else "#f9fafb"
 text_color = "#f8fafc" if S.get("dark_mode") else "#0f172a"
@@ -523,17 +540,18 @@ with st.sidebar:
     st.markdown("---")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "vision", "chat", "preprocess", "train", "results", "deployment", "playground", "unsupervised", "help"]
     nav_labels = {
-        "dashboard": "🗄️ Data Management",
+        "dashboard": "📁 Data Management",
+        "vision": "👁️ Vision Lab",
         "chat": "📊 Exploratory Analysis",
-        "preprocess": "🧬 Pipeline & Preprocessing",
-        "train": "🧪 Training & Experiments",
+        "preprocess": "🧪 Pipeline & Preprocessing",
+        "train": "🔬 Training & Experiments",
         "results": "📈 Evaluation & Metrics",
         "deployment": "🚀 Model Deployment",
         "playground": "➕ New Experiment",
         "unsupervised": "⚙️ Settings",
-        "help": "📖 Documentation"
+        "help": "❓ Help & Documentation"
     }
     
     pg = st.radio(
@@ -559,7 +577,35 @@ with st.sidebar:
 # The content below is contained within the single non-scrolling Streamlit 'main' area,
 # with the block-container CSS handling the internal scrolling for content overflow.
 
-if S["page"] == "chat":
+if S["page"] == "vision":
+    st.title("👁️ Vision Lab")
+    st.markdown("### Browser-based Image Classification")
+
+    if not S.get("processed_images"):
+        st.info("🖼️ Upload images or a ZIP file from the Dashboard to analyze them here.")
+        st.stop()
+
+    if TRANSFORMERS_OK:
+        with st.spinner("Loading vision model..."):
+            v_pipe = get_vision_pipeline()
+
+        if v_pipe:
+            # Display images and allow classification
+            cols = st.columns(3)
+            for i, (name, img) in enumerate(S["processed_images"]):
+                with cols[i % 3]:
+                    st.image(img, caption=name, use_container_width=True)
+                    if st.button(f"Analyze {i}", key=f"v_btn_{i}"):
+                        with st.spinner("Analyzing..."):
+                            # ViT requires 224x224
+                            img_resized = img.resize((224, 224))
+                            results = v_pipe(img_resized)
+                            for res in results:
+                                st.write(f"**{res['label']}**: {res['score']:.2%}")
+    else:
+        st.error("❌ Transformers not available for Vision Lab.")
+
+elif S["page"] == "chat":
     st.title("💬 Chat with your Data (AI-Powered)")
 
     if S["df"] is None:
@@ -637,20 +683,22 @@ elif S["page"] == "dashboard":
                 except Exception as e:
                     st.error(f"❌ Failed to read CSV: {str(e)}")
             elif file_type == 'zip':
-                with st.spinner("Processing ZIP file and resizing images..."):
+                with st.spinner("Processing ZIP file..."):
                     res = process_zip_images(uploaded_file)
                     if isinstance(res, str):
                         st.error(f"❌ Failed to process zip: {res}")
                     else:
-                        st.success(f"✅ Extracted and resized {len(res)} images to 224x224.")
+                        st.success(f"✅ Extracted {len(res)} images.")
                         S["processed_images"] = res
                         cols = st.columns(4)
                         for i, (name, img) in enumerate(res[:12]): # display up to 12
                             cols[i % 4].image(img, caption=name, use_container_width=True)
             elif file_type in ['png', 'jpg', 'jpeg']:
                 try:
-                    img = Image.open(uploaded_file)
+                    img = Image.open(uploaded_file).copy()
                     st.image(img, caption="Uploaded Image", use_container_width=True)
+                    if "processed_images" not in S: S["processed_images"] = []
+                    S["processed_images"].append((uploaded_file.name, img))
                 except Exception as e:
                     st.error(f"❌ Failed to open image: {str(e)}")
             elif file_type == 'mp4':
@@ -755,13 +803,13 @@ elif S["page"] == "dashboard":
                         best = cls_compare(verbose=False)
                         model = cls_finalize(best)
                         metrics = cls_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1": metrics.get("F1", 0), "task": "Classification"}
+                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1_score": metrics.get("F1", 0), "task": "Classification"}
                     else:
                         reg_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
                         best = reg_compare(verbose=False)
                         model = reg_finalize(best)
                         metrics = reg_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "r2": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
+                        res_summary = {"model": str(best).split("(")[0], "r2_score": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
 
                     # 5. Store results
                     S["model"] = model
@@ -2334,7 +2382,7 @@ elif S["page"] == "deployment":
                 features = S["final_cols"]
             else:
                 st.warning("⚠️ Could not detect feature names. Using original dataset columns if available.")
-                if S["df"] is not None:
+                if S.get("df") is not None:
                     features = [c for c in S["df"].columns if c != S.get("target")]
                 else:
                     features = []
