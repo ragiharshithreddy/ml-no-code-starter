@@ -42,6 +42,9 @@ import pickle
 import joblib
 import io
 
+# ===================== PAGE CONFIG =====================
+st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
+
 # Optional libraries
 try:
     from ydata_profiling import ProfileReport
@@ -121,7 +124,6 @@ def process_zip_images(uploaded_zip):
                     with z.open(file_info) as file:
                         try:
                             img = Image.open(file).copy()
-                            img = img.resize((224, 224))
                             processed_images.append((file_info.filename, img))
                         except Exception as e:
                             pass
@@ -147,6 +149,10 @@ def generate_colab_notebook(task, target, email=""):
         with open("notebooks/training_template.ipynb", "r") as f:
             notebook = json.load(f)
 
+        df_context = ""
+        if S.get("df") is not None:
+            df_context = f"# Dataset Context:\n# {S['df'].describe().to_string()}\n"
+
         # Update markers in the template
         for cell in notebook['cells']:
             if cell['cell_type'] == 'code':
@@ -159,6 +165,13 @@ def generate_colab_notebook(task, target, email=""):
                         new_source.append(f"task_type = '{task.lower()}' # @param [\"classification\", \"regression\"]\n")
                     elif 'recipient_email =' in line:
                         new_source.append(f"recipient_email = '{email}' # @param {{type:\"string\"}}\n")
+                    elif 'import pandas as pd' in line and df_context:
+                        new_source.append(line)
+                        new_source.append(df_context)
+                    elif 'sender_email =' in line:
+                         new_source.append(f"sender_email = '' # @param {{type:\"string\"}}\n")
+                    elif 'sender_password =' in line:
+                         new_source.append(f"sender_password = '' # @param {{type:\"string\"}}\n")
                     else:
                         new_source.append(line)
                 cell['source'] = new_source
@@ -351,10 +364,7 @@ if "S" not in st.session_state:
     }
 S = st.session_state.S
 
-# ===================== PAGE CONFIG & THEME =====================
-# Set page layout to wide and move after session state
-st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
-
+# ===================== THEME =====================
 # Theme configuration based on Dark Mode
 bg_color = "#0f172a" if S.get("dark_mode") else "#f9fafb"
 text_color = "#f8fafc" if S.get("dark_mode") else "#0f172a"
@@ -523,17 +533,18 @@ with st.sidebar:
     st.markdown("---")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "vision", "chat", "preprocess", "train", "results", "deployment", "playground", "unsupervised", "help"]
     nav_labels = {
-        "dashboard": "🗄️ Data Management",
+        "dashboard": "📁 Data Management",
+        "vision": "👁️ Vision Lab",
         "chat": "📊 Exploratory Analysis",
-        "preprocess": "🧬 Pipeline & Preprocessing",
-        "train": "🧪 Training & Experiments",
+        "preprocess": "🧪 Pipeline & Preprocessing",
+        "train": "🔬 Training & Experiments",
         "results": "📈 Evaluation & Metrics",
         "deployment": "🚀 Model Deployment",
         "playground": "➕ New Experiment",
         "unsupervised": "⚙️ Settings",
-        "help": "📖 Documentation"
+        "help": "❓ Help & Documentation"
     }
     
     pg = st.radio(
@@ -559,7 +570,52 @@ with st.sidebar:
 # The content below is contained within the single non-scrolling Streamlit 'main' area,
 # with the block-container CSS handling the internal scrolling for content overflow.
 
-if S["page"] == "chat":
+if S["page"] == "vision":
+    st.title("👁️ Vision Lab")
+
+    if "processed_images" not in S or not S["processed_images"]:
+        st.info("📁 Upload a ZIP of images from the Dashboard to use Vision Lab.")
+        st.stop()
+
+    if not TRANSFORMERS_OK:
+        st.error("❌ Transformers not available. Please install dependencies.")
+        st.stop()
+
+    @st.cache_resource
+    def get_vision_pipeline():
+        try:
+            return pipeline("image-classification", model="google/vit-base-patch16-224")
+        except Exception as e:
+            st.error(f"Failed to load Vision pipeline: {str(e)}")
+            return None
+
+    st.markdown(f"### 🖼️ Analyzed Images ({len(S['processed_images'])})")
+
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        img_idx = st.select_slider("Select Image to Classify", options=range(len(S["processed_images"])),
+                                   format_func=lambda x: S["processed_images"][x][0])
+        name, img = S["processed_images"][img_idx]
+        st.image(img, caption=name, use_container_width=True)
+
+    with col2:
+        if st.button("👁️ Classify Image", type="primary"):
+            with st.spinner("AI is looking at the image..."):
+                vision_pipe = get_vision_pipeline()
+                if vision_pipe:
+                    # Resize for model input internally
+                    input_img = img.resize((224, 224))
+                    results = vision_pipe(input_img)
+
+                    st.markdown("#### 🏆 Top Predictions")
+                    for res in results:
+                        score = res['score']
+                        label = res['label']
+                        st.write(f"**{label}**: {score*100:.2f}%")
+                        st.progress(score)
+
+elif S["page"] == "chat":
     st.title("💬 Chat with your Data (AI-Powered)")
 
     if S["df"] is None:
@@ -637,12 +693,12 @@ elif S["page"] == "dashboard":
                 except Exception as e:
                     st.error(f"❌ Failed to read CSV: {str(e)}")
             elif file_type == 'zip':
-                with st.spinner("Processing ZIP file and resizing images..."):
+                with st.spinner("Processing ZIP file..."):
                     res = process_zip_images(uploaded_file)
                     if isinstance(res, str):
                         st.error(f"❌ Failed to process zip: {res}")
                     else:
-                        st.success(f"✅ Extracted and resized {len(res)} images to 224x224.")
+                        st.success(f"✅ Extracted {len(res)} images.")
                         S["processed_images"] = res
                         cols = st.columns(4)
                         for i, (name, img) in enumerate(res[:12]): # display up to 12
@@ -681,10 +737,10 @@ elif S["page"] == "dashboard":
             # Data types
             with st.expander("📋 Column Info"):
                 col_info = pd.DataFrame({
-                    'Column': S["df"].columns,
-                    'Type': S["df"].dtypes,
-                    'Missing': S["df"].isnull().sum(),
-                    'Unique': S["df"].nunique()
+                    'Column': [str(c) for c in S["df"].columns],
+                    'Type': [str(t) for t in S["df"].dtypes],
+                    'Missing': S["df"].isnull().sum().values,
+                    'Unique': S["df"].nunique().values
                 })
                 st.dataframe(col_info, use_container_width=True)
     
@@ -755,13 +811,13 @@ elif S["page"] == "dashboard":
                         best = cls_compare(verbose=False)
                         model = cls_finalize(best)
                         metrics = cls_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1": metrics.get("F1", 0), "task": "Classification"}
+                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1_score": metrics.get("F1", 0), "task": "Classification"}
                     else:
                         reg_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
                         best = reg_compare(verbose=False)
                         model = reg_finalize(best)
                         metrics = reg_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "r2": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
+                        res_summary = {"model": str(best).split("(")[0], "r2_score": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
 
                     # 5. Store results
                     S["model"] = model
@@ -769,6 +825,7 @@ elif S["page"] == "dashboard":
                     S["task"] = res_summary["task"]
                     S["results"] = res_summary
                     S["final_cols"] = [c for c in df_work.columns if c != target]
+                    S["surprise_model_ready"] = True
 
                     st.success(f"✅ Quick AutoML complete! Best Model: **{res_summary['model']}**")
 
@@ -779,6 +836,20 @@ elif S["page"] == "dashboard":
 
                 except Exception as e:
                     st.error(f"❌ Quick AutoML failed: {str(e)}")
+
+        if S.get("surprise_model_ready") and S.get("model"):
+            try:
+                buffer = io.BytesIO()
+                joblib.dump(S["model"], buffer)
+                st.download_button(
+                    label="📥 Download Best AutoML Model (.pkl)",
+                    data=buffer.getvalue(),
+                    file_name="surprise_best_model.pkl",
+                    mime="application/octet-stream",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.error(f"Failed to prepare model for download: {str(e)}")
 
     # EDA Section
     if S["df"] is not None:
@@ -2338,6 +2409,20 @@ elif S["page"] == "deployment":
                     features = [c for c in S["df"].columns if c != S.get("target")]
                 else:
                     features = []
+
+        if model is not None:
+            try:
+                buffer = io.BytesIO()
+                joblib.dump(model, buffer)
+                st.download_button(
+                    label="📥 Download Loaded Model (.pkl)",
+                    data=buffer.getvalue(),
+                    file_name="loaded_model.pkl",
+                    mime="application/octet-stream",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.error(f"Failed to prepare model for download: {str(e)}")
 
     with col2:
         if model is not None and features:
