@@ -82,6 +82,9 @@ import time
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
+# ===================== PAGE CONFIG =====================
+st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
+
 # ===================== SECURITY: EMAIL CONFIG =====================
 # IMPORTANT: Never hardcode credentials in production!
 # We now use Streamlit secrets for better security.
@@ -112,6 +115,15 @@ def get_ai_pipeline():
         st.error(f"Failed to load AI pipeline: {str(e)}")
         return None
 
+@st.cache_resource
+def get_vision_pipeline():
+    """Load ViT model for browser-based image classification"""
+    try:
+        return pipeline("image-classification", model="google/vit-base-patch16-224")
+    except Exception as e:
+        st.error(f"Failed to load Vision pipeline: {str(e)}")
+        return None
+
 def process_zip_images(uploaded_zip):
     processed_images = []
     try:
@@ -121,7 +133,6 @@ def process_zip_images(uploaded_zip):
                     with z.open(file_info) as file:
                         try:
                             img = Image.open(file).copy()
-                            img = img.resize((224, 224))
                             processed_images.append((file_info.filename, img))
                         except Exception as e:
                             pass
@@ -142,10 +153,18 @@ def render_dashboard():
         st.metric(label="Temp", value="68°C", delta="+2°C", delta_color="inverse")
     st.markdown("---")
 
-def generate_colab_notebook(task, target, email=""):
+def generate_colab_notebook(task, target, email="", df=None):
     try:
         with open("notebooks/training_template.ipynb", "r") as f:
             notebook = json.load(f)
+
+        # Dataset Context
+        context = ""
+        if df is not None:
+            try:
+                context = f"\n# Dataset Context (for AI assistance):\n# {df.describe().to_string().replace('\n', '\n# ')}\n"
+            except:
+                pass
 
         # Update markers in the template
         for cell in notebook['cells']:
@@ -159,6 +178,9 @@ def generate_colab_notebook(task, target, email=""):
                         new_source.append(f"task_type = '{task.lower()}' # @param [\"classification\", \"regression\"]\n")
                     elif 'recipient_email =' in line:
                         new_source.append(f"recipient_email = '{email}' # @param {{type:\"string\"}}\n")
+                    elif 'import pandas as pd' in line and context:
+                        new_source.append(line)
+                        new_source.append(context)
                     else:
                         new_source.append(line)
                 cell['source'] = new_source
@@ -206,7 +228,7 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
                 <h3 style='margin-top:0; color:#1f2937;'>📊 Model Summary</h3>
                 <p style='margin:4px 0;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
                 <p style='margin:4px 0;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
-                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task') == "Classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
+                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if str(results.get('task')).lower() == "classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
             </div>
 
             {extra_html}
@@ -347,13 +369,12 @@ if "S" not in st.session_state:
         "preprocessing_steps": [],
         "chat_history": [],
         "leaderboard": [],
+        "processed_images": [],
         "dark_mode": False
     }
 S = st.session_state.S
 
-# ===================== PAGE CONFIG & THEME =====================
-# Set page layout to wide and move after session state
-st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
+# ===================== THEME =====================
 
 # Theme configuration based on Dark Mode
 bg_color = "#0f172a" if S.get("dark_mode") else "#f9fafb"
@@ -523,9 +544,10 @@ with st.sidebar:
     st.markdown("---")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "vision", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
     nav_labels = {
         "dashboard": "🗄️ Data Management",
+        "vision": "👁️ Vision Lab",
         "chat": "📊 Exploratory Analysis",
         "preprocess": "🧬 Pipeline & Preprocessing",
         "train": "🧪 Training & Experiments",
@@ -637,20 +659,24 @@ elif S["page"] == "dashboard":
                 except Exception as e:
                     st.error(f"❌ Failed to read CSV: {str(e)}")
             elif file_type == 'zip':
-                with st.spinner("Processing ZIP file and resizing images..."):
+                with st.spinner("Processing ZIP file..."):
                     res = process_zip_images(uploaded_file)
                     if isinstance(res, str):
                         st.error(f"❌ Failed to process zip: {res}")
                     else:
-                        st.success(f"✅ Extracted and resized {len(res)} images to 224x224.")
+                        st.success(f"✅ Extracted {len(res)} images.")
                         S["processed_images"] = res
                         cols = st.columns(4)
                         for i, (name, img) in enumerate(res[:12]): # display up to 12
                             cols[i % 4].image(img, caption=name, use_container_width=True)
             elif file_type in ['png', 'jpg', 'jpeg']:
                 try:
-                    img = Image.open(uploaded_file)
+                    img = Image.open(uploaded_file).copy()
                     st.image(img, caption="Uploaded Image", use_container_width=True)
+                    if "processed_images" not in S: S["processed_images"] = []
+                    # Avoid duplicates
+                    if not any(uploaded_file.name == name for name, _ in S["processed_images"]):
+                        S["processed_images"].append((uploaded_file.name, img))
                 except Exception as e:
                     st.error(f"❌ Failed to open image: {str(e)}")
             elif file_type == 'mp4':
@@ -682,9 +708,9 @@ elif S["page"] == "dashboard":
             with st.expander("📋 Column Info"):
                 col_info = pd.DataFrame({
                     'Column': S["df"].columns,
-                    'Type': S["df"].dtypes,
-                    'Missing': S["df"].isnull().sum(),
-                    'Unique': S["df"].nunique()
+                    'Type': [str(t) for t in S["df"].dtypes],
+                    'Missing': S["df"].isnull().sum().values,
+                    'Unique': S["df"].nunique().values
                 })
                 st.dataframe(col_info, use_container_width=True)
     
@@ -749,19 +775,52 @@ elif S["page"] == "dashboard":
                     is_numeric = pd.api.types.is_numeric_dtype(df_work[target])
                     task_type = "classification" if not is_numeric or n_unique <= 20 else "regression"
 
-                    # 4. PyCaret AutoML
-                    if task_type == "classification":
-                        cls_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
-                        best = cls_compare(verbose=False)
-                        model = cls_finalize(best)
-                        metrics = cls_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1": metrics.get("F1", 0), "task": "Classification"}
+                    # 4. AutoML Logic (PyCaret with Sklearn Fallback)
+                    if PYCARET_OK:
+                        if task_type == "classification":
+                            cls_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
+                            best = cls_compare(verbose=False)
+                            model = cls_finalize(best)
+                            metrics = cls_pull().iloc[0].to_dict()
+                            res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1_score": metrics.get("F1", 0), "task": "Classification"}
+                        else:
+                            reg_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
+                            best = reg_compare(verbose=False)
+                            model = reg_finalize(best)
+                            metrics = reg_pull().iloc[0].to_dict()
+                            res_summary = {"model": str(best).split("(")[0], "r2_score": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
                     else:
-                        reg_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
-                        best = reg_compare(verbose=False)
-                        model = reg_finalize(best)
-                        metrics = reg_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "r2": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
+                        # Scikit-learn fallback
+                        X = df_work.drop(columns=[target])
+                        y = df_work[target]
+                        X, encoders = safe_label_encode(X)
+                        S["label_encoders"] = encoders
+
+                        if task_type == "classification":
+                            if y.dtype == "object":
+                                le = LabelEncoder()
+                                y = le.fit_transform(y.astype(str))
+                                S["label_encoders"][target] = le
+
+                            model = RandomForestClassifier(n_estimators=100, random_state=42)
+                            model.fit(X, y)
+                            y_pred = model.predict(X)
+                            res_summary = {
+                                "model": "RandomForestClassifier (Fallback)",
+                                "accuracy": accuracy_score(y, y_pred),
+                                "f1_score": f1_score(y, y_pred, average='weighted'),
+                                "task": "Classification"
+                            }
+                        else:
+                            model = RandomForestRegressor(n_estimators=100, random_state=42)
+                            model.fit(X, y)
+                            y_pred = model.predict(X)
+                            res_summary = {
+                                "model": "RandomForestRegressor (Fallback)",
+                                "r2_score": r2_score(y, y_pred),
+                                "rmse": np.sqrt(mean_squared_error(y, y_pred)),
+                                "task": "Regression"
+                            }
 
                     # 5. Store results
                     S["model"] = model
@@ -769,6 +828,7 @@ elif S["page"] == "dashboard":
                     S["task"] = res_summary["task"]
                     S["results"] = res_summary
                     S["final_cols"] = [c for c in df_work.columns if c != target]
+                    S["surprise_model_ready"] = True
 
                     st.success(f"✅ Quick AutoML complete! Best Model: **{res_summary['model']}**")
 
@@ -779,6 +839,17 @@ elif S["page"] == "dashboard":
 
                 except Exception as e:
                     st.error(f"❌ Quick AutoML failed: {str(e)}")
+
+        if S.get("surprise_model_ready"):
+            st.markdown("#### 📥 Download Surprise Model")
+            buf = io.BytesIO()
+            joblib.dump(S["model"], buf)
+            st.download_button(
+                label="📥 Download .pkl Model",
+                data=buf.getvalue(),
+                file_name="surprise_model.pkl",
+                mime="application/octet-stream"
+            )
 
     # EDA Section
     if S["df"] is not None:
@@ -794,6 +865,36 @@ elif S["page"] == "dashboard":
                     st.error(f"❌ EDA generation failed: {str(e)}")
 
 # ===================== PREPROCESS =====================
+elif S["page"] == "vision":
+    st.title("👁️ Vision Lab")
+    st.markdown("### Browser-based Image Classification")
+
+    if not TRANSFORMERS_OK:
+        st.error("❌ Transformers library not available. Vision Lab is disabled.")
+        st.stop()
+
+    if "processed_images" not in S or not S["processed_images"]:
+        st.info("📁 Upload a ZIP of images or a single image in the Dashboard to begin.")
+        st.stop()
+
+    st.write(f"Analyzable Images: **{len(S['processed_images'])}**")
+
+    vision_pipe = get_vision_pipeline()
+
+    if vision_pipe:
+        cols = st.columns(3)
+        for i, (name, img) in enumerate(S["processed_images"][:12]):
+            with cols[i % 3]:
+                st.image(img, caption=name, use_container_width=True)
+                if st.button(f"Classify {name}", key=f"cls_{i}"):
+                    with st.spinner("Analyzing..."):
+                        # Resize to 224x224 for ViT internally
+                        input_img = img.resize((224, 224))
+                        results = vision_pipe(input_img)
+                        st.markdown("**Top Predictions:**")
+                        for res in results[:3]:
+                            st.write(f"- {res['label']}: {res['score']:.2%}")
+
 elif S["page"] == "preprocess":
     st.title("🧹 Preprocessing Studio")
     
@@ -1090,7 +1191,7 @@ elif S["page"] == "train":
 
         if st.button("📓 Generate Notebook"):
             try:
-                notebook_str = generate_colab_notebook(S["task"], S["target"], S.get("user_email", ""))
+                notebook_str = generate_colab_notebook(S["task"], S["target"], S.get("user_email", ""), df=S.get("df"))
                 st.download_button(
                     label="📥 Download Colab Notebook",
                     data=notebook_str,
@@ -1463,7 +1564,7 @@ elif S["page"] == "train":
     
     with colab_col1:
         # Colab Export logic available BEFORE training
-        colab_json = generate_colab_notebook(task, S["target"], S.get("user_email", ""))
+        colab_json = generate_colab_notebook(task, S["target"], S.get("user_email", ""), df=S.get("df"))
         st.download_button(
             label="📥 Export to Google Colab",
             data=colab_json,
@@ -1858,7 +1959,7 @@ elif S["page"] == "playground":
     if S.get("results") and S.get("task") and S.get("target"):
         st.markdown("### 📥 Export Training Setup")
         # Colab Export logic
-        colab_json = generate_colab_notebook(S["task"], S["target"], S.get("user_email", ""))
+        colab_json = generate_colab_notebook(S["task"], S["target"], S.get("user_email", ""), df=S.get("df"))
         st.download_button(
             label="📥 Export to Google Colab",
             data=colab_json,
@@ -2305,15 +2406,26 @@ elif S["page"] == "deployment":
 
         elif load_method == "Upload File":
             uploaded_model = st.file_uploader("Upload .pkl model file", type=["pkl"])
+            metadata_file = st.file_uploader("Upload metadata .json (optional)", type=["json"])
+
             if uploaded_model is not None:
                 try:
                     model = joblib.load(uploaded_model)
                     st.success("✅ Model uploaded successfully!")
+
+                    if metadata_file:
+                        meta = json.load(metadata_file)
+                        features = meta.get("features", [])
+                        S["final_cols"] = features
+                        S["label_encoders"] = meta.get("label_encoders", {})
+                        st.info("✅ Metadata restored: features and encoders mapped.")
                 except Exception as e:
                     st.error(f"❌ Failed to load model: {str(e)}")
 
         elif load_method == "Import URL":
             model_url = st.text_input("Direct .pkl URL", placeholder="https://example.com/model.pkl")
+            meta_url = st.text_input("Metadata .json URL (optional)", placeholder="https://example.com/meta.json")
+
             if model_url:
                 try:
                     import requests
@@ -2323,6 +2435,14 @@ elif S["page"] == "deployment":
                         response.raise_for_status()
                         model = joblib.load(io.BytesIO(response.content))
                     st.success("✅ Model imported from URL!")
+
+                    if meta_url:
+                        response_meta = requests.get(meta_url, timeout=10)
+                        meta = response_meta.json()
+                        features = meta.get("features", [])
+                        S["final_cols"] = features
+                        S["label_encoders"] = meta.get("label_encoders", {})
+                        st.info("✅ Metadata imported: features and encoders mapped.")
                 except Exception as e:
                     st.error(f"❌ URL import failed: {str(e)}")
 
