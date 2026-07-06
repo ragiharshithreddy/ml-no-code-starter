@@ -3,6 +3,7 @@
 # Enhanced with proper error handling, security, and no data leakage
 
 import streamlit as st
+st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -121,7 +122,6 @@ def process_zip_images(uploaded_zip):
                     with z.open(file_info) as file:
                         try:
                             img = Image.open(file).copy()
-                            img = img.resize((224, 224))
                             processed_images.append((file_info.filename, img))
                         except Exception as e:
                             pass
@@ -159,6 +159,12 @@ def generate_colab_notebook(task, target, email=""):
                         new_source.append(f"task_type = '{task.lower()}' # @param [\"classification\", \"regression\"]\n")
                     elif 'recipient_email =' in line:
                         new_source.append(f"recipient_email = '{email}' # @param {{type:\"string\"}}\n")
+                    elif 'df = pd.read_csv(filename)' in line:
+                        new_source.append(line)
+                        # Inject context
+                        if S["df"] is not None:
+                            summary = S["df"].describe().to_string().replace("\n", "\n# ")
+                            new_source.append(f"\n# Dataset Context:\n# {summary}\n")
                     else:
                         new_source.append(line)
                 cell['source'] = new_source
@@ -206,7 +212,7 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
                 <h3 style='margin-top:0; color:#1f2937;'>📊 Model Summary</h3>
                 <p style='margin:4px 0;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
                 <p style='margin:4px 0;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
-                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task') == "Classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
+                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p><p style='margin:4px 0;'><strong>F1 Score:</strong> {results.get('f1_score', 0):.4f}</p>" if str(results.get('task')).lower() == "classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p><p style='margin:4px 0;'><strong>RMSE:</strong> {results.get('rmse', 0):.4f}</p>"}
             </div>
 
             {extra_html}
@@ -352,9 +358,6 @@ if "S" not in st.session_state:
 S = st.session_state.S
 
 # ===================== PAGE CONFIG & THEME =====================
-# Set page layout to wide and move after session state
-st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
-
 # Theme configuration based on Dark Mode
 bg_color = "#0f172a" if S.get("dark_mode") else "#f9fafb"
 text_color = "#f8fafc" if S.get("dark_mode") else "#0f172a"
@@ -425,6 +428,9 @@ THEME = f"""
     }}
 
     h1,h2,h3,h4,h5,h6,p,span,label {{
+        color: var(--text) !important;
+    }}
+    .stMarkdown h1, .stMarkdown h2, .stMarkdown h3, .stMarkdown h4, .stMarkdown h5, .stMarkdown h6 {{
         color: var(--text) !important;
     }}
 
@@ -520,12 +526,16 @@ with st.sidebar:
 
     # Theme Toggle
     S["dark_mode"] = st.toggle("🌙 Dark Mode", value=S.get("dark_mode", False))
+    if st.button("🔄 Toggle Theme", use_container_width=True):
+        S["dark_mode"] = not S["dark_mode"]
+        st.rerun()
     st.markdown("---")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "vision", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
     nav_labels = {
         "dashboard": "🗄️ Data Management",
+        "vision": "👁️ Vision Lab",
         "chat": "📊 Exploratory Analysis",
         "preprocess": "🧬 Pipeline & Preprocessing",
         "train": "🧪 Training & Experiments",
@@ -559,7 +569,42 @@ with st.sidebar:
 # The content below is contained within the single non-scrolling Streamlit 'main' area,
 # with the block-container CSS handling the internal scrolling for content overflow.
 
-if S["page"] == "chat":
+if S["page"] == "vision":
+    st.title("👁️ Vision Lab")
+    st.markdown("### Browser-based Image Classification")
+
+    if not TRANSFORMERS_OK:
+        st.error("❌ Transformers library not found. Please install it to use Vision Lab.")
+        st.stop()
+
+    if "processed_images" not in S or not S["processed_images"]:
+        st.info("📂 Please upload a ZIP of images on the Dashboard to begin.")
+        st.stop()
+
+    @st.cache_resource
+    def get_vision_pipeline():
+        try:
+            return pipeline("image-classification", model="google/vit-base-patch16-224")
+        except Exception as e:
+            st.error(f"Failed to load vision pipeline: {str(e)}")
+            return None
+
+    vision_classifier = get_vision_pipeline()
+
+    if vision_classifier:
+        cols = st.columns(3)
+        for i, (name, img) in enumerate(S["processed_images"]):
+            with cols[i % 3]:
+                st.image(img, caption=name, use_container_width=True)
+                if st.button(f"Analyze {name}", key=f"btn_{i}"):
+                    with st.spinner("Classifying..."):
+                        # Ensure image is in RGB and resized for ViT
+                        img_rgb = img.convert("RGB").resize((224, 224))
+                        results = vision_classifier(img_rgb)
+                        for res in results[:3]:
+                            st.write(f"**{res['label']}**: {res['score']:.2%}")
+
+elif S["page"] == "chat":
     st.title("💬 Chat with your Data (AI-Powered)")
 
     if S["df"] is None:
@@ -732,53 +777,86 @@ elif S["page"] == "dashboard":
             with st.spinner("🤖 Running Automated End-to-End ML Pipeline..."):
                 try:
                     df_work = S["df"].copy()
-
-                    # 1. Simple target detection (last column)
                     target = df_work.columns[-1]
 
-                    # 2. Basic Preprocessing
+                    # Basic Preprocessing
                     num_cols = df_work.select_dtypes(include=[np.number]).columns.tolist()
                     if target in num_cols: num_cols.remove(target)
-
                     if num_cols:
                         imputer = SimpleImputer(strategy="median")
                         df_work[num_cols] = imputer.fit_transform(df_work[num_cols])
 
-                    # 3. Detect Task
                     n_unique = df_work[target].nunique()
                     is_numeric = pd.api.types.is_numeric_dtype(df_work[target])
                     task_type = "classification" if not is_numeric or n_unique <= 20 else "regression"
 
-                    # 4. PyCaret AutoML
-                    if task_type == "classification":
-                        cls_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
-                        best = cls_compare(verbose=False)
-                        model = cls_finalize(best)
-                        metrics = cls_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1": metrics.get("F1", 0), "task": "Classification"}
+                    if PYCARET_OK:
+                        if task_type == "classification":
+                            cls_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
+                            best = cls_compare(verbose=False)
+                            model = cls_finalize(best)
+                            metrics = cls_pull().iloc[0].to_dict()
+                            res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1_score": metrics.get("F1", 0), "task": "Classification"}
+                        else:
+                            reg_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
+                            best = reg_compare(verbose=False)
+                            model = reg_finalize(best)
+                            metrics = reg_pull().iloc[0].to_dict()
+                            res_summary = {"model": str(best).split("(")[0], "r2_score": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
                     else:
-                        reg_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
-                        best = reg_compare(verbose=False)
-                        model = reg_finalize(best)
-                        metrics = reg_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "r2": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
+                        # Scikit-Learn Fallback
+                        X = df_work.drop(columns=[target])
+                        y = df_work[target]
+                        X, encoders = safe_label_encode(X)
+                        S["label_encoders"] = encoders
 
-                    # 5. Store results
+                        if task_type == "classification":
+                            model = RandomForestClassifier(n_estimators=100, random_state=42)
+                            model.fit(X, y)
+                            y_pred = model.predict(X)
+                            res_summary = {
+                                "model": "RandomForest (Fallback)",
+                                "accuracy": accuracy_score(y, y_pred),
+                                "f1_score": f1_score(y, y_pred, average='weighted'),
+                                "task": "Classification"
+                            }
+                        else:
+                            model = RandomForestRegressor(n_estimators=100, random_state=42)
+                            model.fit(X, y)
+                            y_pred = model.predict(X)
+                            res_summary = {
+                                "model": "RandomForest (Fallback)",
+                                "r2_score": r2_score(y, y_pred),
+                                "rmse": np.sqrt(mean_squared_error(y, y_pred)),
+                                "task": "Regression"
+                            }
+
                     S["model"] = model
                     S["target"] = target
                     S["task"] = res_summary["task"]
                     S["results"] = res_summary
                     S["final_cols"] = [c for c in df_work.columns if c != target]
+                    S["surprise_model_ready"] = True
 
                     st.success(f"✅ Quick AutoML complete! Best Model: **{res_summary['model']}**")
 
-                    # 6. Email Results
                     if ENABLE_EMAIL and S.get("user_email"):
                         send_results_email(S["user_email"], "🚀 Your 'Surprise Me' AutoML Results", res_summary)
                         st.info(f"📧 Results sent to {S['user_email']}")
 
                 except Exception as e:
                     st.error(f"❌ Quick AutoML failed: {str(e)}")
+
+        if S.get("surprise_model_ready") and S.get("model") is not None:
+            model_bytes = io.BytesIO()
+            joblib.dump(S["model"], model_bytes)
+            st.download_button(
+                label="📥 Download Trained Model (.pkl)",
+                data=model_bytes.getvalue(),
+                file_name="surprise_model.pkl",
+                mime="application/octet-stream",
+                use_container_width=True
+            )
 
     # EDA Section
     if S["df"] is not None:
