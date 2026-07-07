@@ -16,3 +16,6 @@ torch
 torchvision
 Pillow
 requests
+jinja2
+shap
+joblib

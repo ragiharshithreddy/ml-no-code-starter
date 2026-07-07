@@ -3,6 +3,10 @@
 # Enhanced with proper error handling, security, and no data leakage
 
 import streamlit as st
+
+# MUST BE FIRST
+st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
+
 import pandas as pd
 import numpy as np
 import plotly.express as px
@@ -121,7 +125,7 @@ def process_zip_images(uploaded_zip):
                     with z.open(file_info) as file:
                         try:
                             img = Image.open(file).copy()
-                            img = img.resize((224, 224))
+                            # img = img.resize((224, 224)) # Removed internal resize
                             processed_images.append((file_info.filename, img))
                         except Exception as e:
                             pass
@@ -206,7 +210,7 @@ def send_results_email(to_email: str, subject: str, results: dict, extra_html: s
                 <h3 style='margin-top:0; color:#1f2937;'>📊 Model Summary</h3>
                 <p style='margin:4px 0;'><strong>Model:</strong> {results.get('model', 'N/A')}</p>
                 <p style='margin:4px 0;'><strong>Task:</strong> {results.get('task', 'N/A')}</p>
-                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task') == "Classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
+                {f"<p style='margin:4px 0;'><strong>Accuracy:</strong> {results.get('accuracy', 0)*100:.2f}%</p>" if results.get('task', '').lower() == "classification" else f"<p style='margin:4px 0;'><strong>R² Score:</strong> {results.get('r2_score', 0):.4f}</p>"}
             </div>
 
             {extra_html}
@@ -353,7 +357,6 @@ S = st.session_state.S
 
 # ===================== PAGE CONFIG & THEME =====================
 # Set page layout to wide and move after session state
-st.set_page_config(page_title="AutoMLPilot Pro", page_icon="✨", layout="wide")
 
 # Theme configuration based on Dark Mode
 bg_color = "#0f172a" if S.get("dark_mode") else "#f9fafb"
@@ -523,9 +526,10 @@ with st.sidebar:
     st.markdown("---")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "vision", "chat", "preprocess", "train", "results", "deployment", "playground", "unsupervised", "help"]
     nav_labels = {
-        "dashboard": "🗄️ Data Management",
+        "dashboard": "📁 Data Management",
+        "vision": "👁️ Vision Lab",
         "chat": "📊 Exploratory Analysis",
         "preprocess": "🧬 Pipeline & Preprocessing",
         "train": "🧪 Training & Experiments",
@@ -562,6 +566,10 @@ with st.sidebar:
 if S["page"] == "chat":
     st.title("💬 Chat with your Data (AI-Powered)")
 
+    if st.button("🗑️ Clear Chat"):
+        S["chat_history"] = []
+        st.rerun()
+
     if S["df"] is None:
         st.info("📁 Upload a dataset first from the Dashboard to chat.")
         st.stop()
@@ -586,9 +594,20 @@ if S["page"] == "chat":
                     try:
                         generator = get_ai_pipeline()
                         # context from dataframe
-                        df_summary = S["df"].describe().to_string()[:500]
-                        cols = ", ".join(S["df"].columns)
-                        ai_prompt = f"Context: Dataset with columns {cols}. Summary: {df_summary}\nUser Question: {prompt}\nAI Answer:"
+                        df_summary = S["df"].describe().to_string()[:600]
+                        cols_info = "\n".join([f"- {c}: {t}" for c, t in zip(S["df"].columns, S["df"].dtypes)])
+
+                        ai_prompt = f"""
+                        You are an expert data scientist assistant.
+                        Current Dataset Context:
+                        Columns and Types:
+                        {cols_info}
+
+                        Summary Statistics (Numeric):
+                        {df_summary}
+
+                        User Question: {prompt}
+                        AI Answer:"""
 
                         response = generator(ai_prompt, max_new_tokens=100, do_sample=True, temperature=0.7)[0]['generated_text']
                         answer = response.split("AI Answer:")[-1].strip()
@@ -602,6 +621,48 @@ if S["page"] == "chat":
                 answer = "I'm currently in limited mode. Please check the EDA tab for insights."
                 st.markdown(answer)
                 S["chat_history"].append({"role": "assistant", "content": answer})
+
+elif S["page"] == "vision":
+    st.title("👁️ Vision Lab")
+    st.markdown("### Browser-Based Image Classification")
+
+    if TRANSFORMERS_OK:
+        @st.cache_resource
+        def load_vision_model():
+            return pipeline("image-classification", model="google/vit-base-patch16-224")
+
+        vision_clf = load_vision_model()
+
+        images_to_process = S.get("processed_images", [])
+
+        if not images_to_process:
+            st.info("📸 Upload a ZIP of images on the Dashboard to start Vision Lab.")
+        else:
+            st.write(f"Loaded {len(images_to_process)} images from Dashboard.")
+
+            # Select image
+            img_names = [x[0] for x in images_to_process]
+            selected_img_name = st.selectbox("Select Image for Classification", img_names)
+
+            selected_img = next(x[1] for x in images_to_process if x[0] == selected_img_name)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.image(selected_img, caption=selected_img_name, use_container_width=True)
+
+            with col2:
+                if st.button("🔍 Classify Image"):
+                    with st.spinner("Analyzing image..."):
+                        # Ensure image is in RGB and resized for ViT
+                        img_rgb = selected_img.convert("RGB").resize((224, 224))
+                        predictions = vision_clf(img_rgb)
+
+                        st.markdown("#### Predictions:")
+                        for p in predictions:
+                            st.write(f"- **{p['label']}**: {p['score']:.4f}")
+                            st.progress(p['score'])
+    else:
+        st.error("❌ Vision Lab requires `transformers` and `torch` libraries.")
 
 elif S["page"] == "dashboard":
 
@@ -755,13 +816,13 @@ elif S["page"] == "dashboard":
                         best = cls_compare(verbose=False)
                         model = cls_finalize(best)
                         metrics = cls_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1": metrics.get("F1", 0), "task": "Classification"}
+                        res_summary = {"model": str(best).split("(")[0], "accuracy": metrics.get("Accuracy", 0), "f1_score": metrics.get("F1", 0), "task": "Classification"}
                     else:
                         reg_setup(data=df_work, target=target, session_id=123, verbose=False, html=False)
                         best = reg_compare(verbose=False)
                         model = reg_finalize(best)
                         metrics = reg_pull().iloc[0].to_dict()
-                        res_summary = {"model": str(best).split("(")[0], "r2": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
+                        res_summary = {"model": str(best).split("(")[0], "r2_score": metrics.get("R2", 0), "rmse": metrics.get("RMSE", 0), "task": "Regression"}
 
                     # 5. Store results
                     S["model"] = model
@@ -769,6 +830,7 @@ elif S["page"] == "dashboard":
                     S["task"] = res_summary["task"]
                     S["results"] = res_summary
                     S["final_cols"] = [c for c in df_work.columns if c != target]
+                    S["surprise_model_ready"] = True
 
                     st.success(f"✅ Quick AutoML complete! Best Model: **{res_summary['model']}**")
 
@@ -779,6 +841,21 @@ elif S["page"] == "dashboard":
 
                 except Exception as e:
                     st.error(f"❌ Quick AutoML failed: {str(e)}")
+
+        if S.get("surprise_model_ready") and S.get("model"):
+            try:
+                # Provide download link
+                buffer = io.BytesIO()
+                joblib.dump(S["model"], buffer)
+                st.download_button(
+                    label="📥 Download AutoML Model (.pkl)",
+                    data=buffer.getvalue(),
+                    file_name="surprise_model.pkl",
+                    mime="application/octet-stream",
+                    use_container_width=True
+                )
+            except Exception as e:
+                st.error(f"❌ Failed to prepare download: {str(e)}")
 
     # EDA Section
     if S["df"] is not None:
@@ -2326,6 +2403,19 @@ elif S["page"] == "deployment":
                 except Exception as e:
                     st.error(f"❌ URL import failed: {str(e)}")
 
+        # Model Restoration (Metadata)
+        st.markdown("---")
+        st.markdown("#### 📄 Model Metadata")
+
+        meta_upload = st.file_uploader("Restore via Metadata JSON", type=["json"])
+        if meta_upload:
+            try:
+                metadata = json.load(meta_upload)
+                features = metadata.get("features", [])
+                st.success("✅ Metadata restored!")
+            except Exception as e:
+                st.error(f"❌ Failed to load metadata: {str(e)}")
+
         # Feature detection for uploaded/URL models
         if model and not features:
             if hasattr(model, 'feature_names_in_'):
@@ -2396,6 +2486,23 @@ elif S["page"] == "deployment":
             st.info("ℹ️ Model loaded but no features detected. Please ensure you have features in your dataset.")
         else:
             st.info("ℹ️ Please upload a model file to begin.")
+
+        if model is not None and features:
+            st.markdown("---")
+            st.markdown("#### 📥 Export for Deployment")
+            metadata = {
+                "features": features,
+                "task": S.get("task"),
+                "target": S.get("target"),
+                "timestamp": time.time()
+            }
+            st.download_button(
+                label="📥 Download Model Metadata (JSON)",
+                data=json.dumps(metadata, indent=4),
+                file_name="model_metadata.json",
+                mime="application/json",
+                use_container_width=True
+            )
 
 # ===================== HELP =====================
 elif S["page"] == "help":
