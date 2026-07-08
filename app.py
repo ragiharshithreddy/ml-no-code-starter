@@ -112,6 +112,15 @@ def get_ai_pipeline():
         st.error(f"Failed to load AI pipeline: {str(e)}")
         return None
 
+@st.cache_resource
+def get_vision_pipeline():
+    """Load ViT for local image classification"""
+    try:
+        return pipeline("image-classification", model="google/vit-base-patch16-224", device=-1)
+    except Exception as e:
+        st.error(f"Failed to load Vision pipeline: {str(e)}")
+        return None
+
 def process_zip_images(uploaded_zip):
     processed_images = []
     try:
@@ -147,6 +156,14 @@ def generate_colab_notebook(task, target, email=""):
         with open("notebooks/training_template.ipynb", "r") as f:
             notebook = json.load(f)
 
+        # Inject context if dataframe exists
+        context_msg = "# Dataset Context: Not Available\n"
+        if S['df'] is not None:
+            try:
+                summary = S['df'].describe().to_string()
+                context_msg = f"# Dataset Context:\n# {summary.replace('\n', '\n# ')}\n"
+            except: pass
+
         # Update markers in the template
         for cell in notebook['cells']:
             if cell['cell_type'] == 'code':
@@ -159,6 +176,9 @@ def generate_colab_notebook(task, target, email=""):
                         new_source.append(f"task_type = '{task.lower()}' # @param [\"classification\", \"regression\"]\n")
                     elif 'recipient_email =' in line:
                         new_source.append(f"recipient_email = '{email}' # @param {{type:\"string\"}}\n")
+                    elif 'import pandas as pd' in line:
+                        new_source.append(line)
+                        new_source.append(context_msg)
                     else:
                         new_source.append(line)
                 cell['source'] = new_source
@@ -347,7 +367,9 @@ if "S" not in st.session_state:
         "preprocessing_steps": [],
         "chat_history": [],
         "leaderboard": [],
-        "dark_mode": False
+        "dark_mode": False,
+        "surprise_model_ready": False,
+        "processed_images": []
     }
 S = st.session_state.S
 
@@ -523,9 +545,10 @@ with st.sidebar:
     st.markdown("---")
     
     # Custom format_func and layout for button-style navigation
-    nav_options = ["dashboard", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
+    nav_options = ["dashboard", "vision", "preprocess", "train", "chat", "playground", "unsupervised", "results", "deployment", "help"]
     nav_labels = {
         "dashboard": "🗄️ Data Management",
+        "vision": "👁️ Vision Lab",
         "chat": "📊 Exploratory Analysis",
         "preprocess": "🧬 Pipeline & Preprocessing",
         "train": "🧪 Training & Experiments",
@@ -559,8 +582,42 @@ with st.sidebar:
 # The content below is contained within the single non-scrolling Streamlit 'main' area,
 # with the block-container CSS handling the internal scrolling for content overflow.
 
-if S["page"] == "chat":
+if S["page"] == "vision":
+    st.title("👁️ Vision Lab")
+    st.markdown("### browser-based image classification")
+
+    if not S.get("processed_images"):
+        st.info("📁 Upload a ZIP of images on the Dashboard to use Vision Lab.")
+        st.stop()
+
+    st.markdown(f"✅ Found **{len(S['processed_images'])}** images for analysis.")
+
+    if TRANSFORMERS_OK:
+        with st.spinner("Loading Vision Pipeline..."):
+            v_pipe = get_vision_pipeline()
+
+        if v_pipe:
+            cols = st.columns(3)
+            for i, (name, img) in enumerate(S["processed_images"]):
+                with cols[i % 3]:
+                    st.image(img, caption=name, use_container_width=True)
+                    if st.button(f"Analyze {name}", key=f"analyze_{i}"):
+                        with st.spinner("Classifying..."):
+                            try:
+                                results = v_pipe(img)
+                                for res in results:
+                                    st.write(f"**{res['label']}**: {res['score']:.2%}")
+                            except Exception as e:
+                                st.error(f"Analysis failed: {str(e)}")
+    else:
+        st.warning("🤖 Transformers not available. Vision Lab requires local AI acceleration.")
+
+elif S["page"] == "chat":
     st.title("💬 Chat with your Data (AI-Powered)")
+
+    if st.button("🗑️ Clear Chat"):
+        S["chat_history"] = []
+        st.rerun()
 
     if S["df"] is None:
         st.info("📁 Upload a dataset first from the Dashboard to chat.")
@@ -643,14 +700,18 @@ elif S["page"] == "dashboard":
                         st.error(f"❌ Failed to process zip: {res}")
                     else:
                         st.success(f"✅ Extracted and resized {len(res)} images to 224x224.")
-                        S["processed_images"] = res
+                        S["processed_images"].extend(res)
                         cols = st.columns(4)
                         for i, (name, img) in enumerate(res[:12]): # display up to 12
                             cols[i % 4].image(img, caption=name, use_container_width=True)
             elif file_type in ['png', 'jpg', 'jpeg']:
                 try:
-                    img = Image.open(uploaded_file)
+                    img = Image.open(uploaded_file).copy()
+                    # Resize for Vision Lab compatibility
+                    img_resized = img.resize((224, 224))
+                    S["processed_images"].append((uploaded_file.name, img_resized))
                     st.image(img, caption="Uploaded Image", use_container_width=True)
+                    st.success("✅ Image added to Vision Lab")
                 except Exception as e:
                     st.error(f"❌ Failed to open image: {str(e)}")
             elif file_type == 'mp4':
@@ -769,6 +830,7 @@ elif S["page"] == "dashboard":
                     S["task"] = res_summary["task"]
                     S["results"] = res_summary
                     S["final_cols"] = [c for c in df_work.columns if c != target]
+                    S["surprise_model_ready"] = True
 
                     st.success(f"✅ Quick AutoML complete! Best Model: **{res_summary['model']}**")
 
@@ -779,6 +841,28 @@ elif S["page"] == "dashboard":
 
                 except Exception as e:
                     st.error(f"❌ Quick AutoML failed: {str(e)}")
+
+        # Persistent Surprise Me Results
+        if S.get("surprise_model_ready") and S.get("results"):
+            st.markdown("<div class='success-box'>", unsafe_allow_html=True)
+            res = S["results"]
+            st.markdown(f"#### 🏆 Last 'Surprise Me' Model: {res['model']}")
+            if res["task"] == "Classification":
+                st.write(f"Accuracy: **{res.get('accuracy', 0)*100:.2f}%** | F1: **{res.get('f1', 0):.4f}**")
+            else:
+                st.write(f"R²: **{res.get('r2', 0):.4f}** | RMSE: **{res.get('rmse', 0):.4f}**")
+
+            # Download Link
+            if S["model"]:
+                buf = io.BytesIO()
+                joblib.dump(S["model"], buf)
+                st.download_button(
+                    label="📥 Download Surprise Model (.pkl)",
+                    data=buf.getvalue(),
+                    file_name="surprise_model.pkl",
+                    mime="application/octet-stream"
+                )
+            st.markdown("</div>", unsafe_allow_html=True)
 
     # EDA Section
     if S["df"] is not None:
@@ -2327,6 +2411,19 @@ elif S["page"] == "deployment":
                     st.error(f"❌ URL import failed: {str(e)}")
 
         # Feature detection for uploaded/URL models
+        if model:
+            st.markdown("#### 📄 Model Metadata")
+            meta_file = st.file_uploader("Upload metadata.json (Optional)", type=["json"])
+            if meta_file:
+                try:
+                    meta = json.load(meta_file)
+                    features = meta.get("features", [])
+                    if "target" in meta: S["target"] = meta["target"]
+                    if "task" in meta: S["task"] = meta["task"]
+                    st.success("✅ Metadata loaded!")
+                except Exception as e:
+                    st.error(f"❌ Failed to load metadata: {str(e)}")
+
         if model and not features:
             if hasattr(model, 'feature_names_in_'):
                 features = list(model.feature_names_in_)
