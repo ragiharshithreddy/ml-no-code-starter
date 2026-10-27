@@ -1,0 +1,19 @@
+# Base44 sandbox image for AutoML Pilot.
+# Dependencies only: the Streamlit app itself is bind-mounted from the repo and
+# run with `streamlit run app.py` (see docker-compose.base44.yml), so source
+# edits are picked up without rebuilding this image.
+FROM python:3.11-slim
+
+ENV PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
+
+WORKDIR /app
+
+COPY requirements.txt /tmp/requirements.txt
+
+# torch/torchvision come from the CPU-only index: the app only does local CPU
+# inference (transformers/distilgpt2), and the default PyPI wheels would pull
+# several GB of CUDA runtime.
+RUN pip install --no-cache-dir --index-url https://download.pytorch.org/whl/cpu torch torchvision \
+ && pip install --no-cache-dir -r /tmp/requirements.txt

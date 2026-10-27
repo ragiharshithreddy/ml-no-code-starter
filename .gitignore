@@ -1,1 +1,3 @@
 __pycache__
+# Runtime artifact: pycaret writes its warnings to logs.log in the working directory.
+logs.log

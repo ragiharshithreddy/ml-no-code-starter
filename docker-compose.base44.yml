@@ -1,0 +1,51 @@
+# Base44 sandbox environment for AutoML Pilot (Streamlit single-process app).
+# Runs the cloned source with a live-reloading Streamlit dev server.
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.base44
+    working_dir: /app
+    volumes:
+      # Live source: edits in the repo are picked up by Streamlit's file watcher.
+      - ./:/app
+    ports:
+      # Streamlit listens on 8501 inside the container; the preview needs it on 3000.
+      - "3000:8501"
+    environment:
+      # Passed through from the sandbox; gates the preview-only server flags below.
+      - BASE44_PREVIEW_MODE
+    # --server.fileWatcherType poll: bind mounts don't deliver inotify events reliably.
+    # The preview flags mirror the repo's own .devcontainer dev command: the hosted
+    # preview reaches the app through a proxy on a different hostname, where
+    # Streamlit's origin/XSRF cookie checks break the websocket session.
+    # With BASE44_PREVIEW_MODE unset or != "1" Streamlit runs with its stock
+    # CORS/XSRF protections.
+    command:
+      - sh
+      - -ec
+      - |
+        if [ "$BASE44_PREVIEW_MODE" = "1" ]; then
+          PREVIEW_FLAGS="--server.enableCORS false --server.enableXsrfProtection false"
+        fi
+        exec streamlit run app.py \
+          --server.address 0.0.0.0 \
+          --server.port 8501 \
+          --server.fileWatcherType poll \
+          --server.runOnSave true \
+          $$PREVIEW_FLAGS
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          python -c "import urllib.request;
+          raise SystemExit(0 if urllib.request.urlopen('http://127.0.0.1:8501/_stcore/health', timeout=5).read().strip() == b'ok' else 1)"
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+    restart: on-failure
+    labels:
+      base44.project: AutoML Pilot
+      base44.kind: web
+      base44.port: 3000
